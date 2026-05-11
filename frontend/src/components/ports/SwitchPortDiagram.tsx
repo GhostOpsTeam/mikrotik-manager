@@ -49,20 +49,49 @@ interface BondEditForm {
   members: string[];
 }
 
-function portColor(port: SwitchPort, selected: boolean): string {
-  if (selected) return '#3b82f6';
-  if (port.disabled) return '#64748b';
-  if (!port.running) return '#ef4444';
-  if (port.type === 'bond') return '#d97706'; // amber for bond logical interface
-  return '#22c55e';
+function portState(port: SwitchPort): 'up' | 'down' | 'disabled' {
+  if (port.disabled) return 'disabled';
+  if (port.running) return 'up';
+  return 'down';
 }
 
-function portBorderColor(port: SwitchPort, selected: boolean): string {
-  if (selected) return '#1d4ed8';
-  if (port.disabled) return '#475569';
-  if (!port.running) return '#dc2626';
-  if (port.type === 'bond') return '#b45309';
-  return '#16a34a';
+function PortTile({
+  port, selected, hovered, isMember,
+  onClick, onMouseEnter, onMouseLeave, onDoubleClick,
+}: {
+  port: SwitchPort; selected: boolean; hovered: boolean; isMember?: boolean;
+  onClick: (e: React.MouseEvent) => void;
+  onMouseEnter: () => void; onMouseLeave: () => void; onDoubleClick: () => void;
+}) {
+  const state = portState(port);
+  const bg = selected ? 'var(--accent)' : state === 'up' ? 'var(--port-up-bg)' : state === 'down' ? 'var(--port-down-bg)' : 'var(--surface-3)';
+  const border = isMember && !selected ? 'var(--warn)' : selected ? 'var(--accent)' : state === 'up' ? 'var(--port-up-border)' : state === 'down' ? 'var(--port-down-border)' : 'var(--line)';
+  const textColor = selected ? '#ffffff' : state === 'up' ? 'var(--good)' : state === 'down' ? 'var(--bad)' : 'var(--ink-4)';
+  const ledBg = selected ? '#ffffff' : state === 'up' ? 'var(--good)' : 'transparent';
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onDoubleClick={onDoubleClick}
+      title={`${port.name}${port.comment ? ` — ${port.comment}` : ''}${port.speed ? ` · ${port.speed}` : ''}`}
+      style={{
+        width: 46, height: 46, borderRadius: 4, position: 'relative', flexShrink: 0,
+        background: bg, border: `1px solid ${border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', color: textColor,
+        fontFamily: 'Geist Mono, monospace', fontSize: 10, fontWeight: 600,
+        opacity: hovered ? 0.8 : 1, transition: 'opacity 0.1s',
+      }}
+    >
+      <div style={{
+        position: 'absolute', top: 4, right: 4, width: 5, height: 5, borderRadius: 999,
+        background: ledBg,
+        boxShadow: state === 'up' && !selected ? '0 0 6px var(--accent)' : 'none',
+      }} />
+      <span>{portLabel(port.name)}</span>
+    </div>
+  );
 }
 
 function portLabel(name: string): string {
@@ -167,26 +196,31 @@ function PortTrafficGraph({
     tx: Math.round(p.tx),
   }));
 
+  const rxPeak = trafficData.length > 0 ? Math.max(...trafficData.map(d => d.rx)) : 0;
+  const txPeak = trafficData.length > 0 ? Math.max(...trafficData.map(d => d.tx)) : 0;
+
   return (
     <div className="card p-5 flex flex-col h-full">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 shrink-0">
-        <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-blue-500" />
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            {portName} — Throughput
-          </h3>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3 shrink-0">
+        <div>
+          <div className="text-[13px] font-semibold" style={{ color: 'var(--ink)' }}>
+            {portName} · throughput
+          </div>
+          <div className="mono text-[11px] mt-[2px]" style={{ color: 'var(--ink-3)' }}>
+            {range} · 30s buckets
+          </div>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-[4px]">
           {TRAFFIC_RANGES.map((r) => (
             <button
               key={r}
               onClick={() => onRangeChange(r)}
-              className={clsx(
-                'px-2 py-1 text-xs rounded font-medium transition-colors',
-                range === r
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-600'
-              )}
+              className="mono text-[11px] px-[8px] py-[4px] rounded-[5px] transition-colors"
+              style={{
+                background: range === r ? 'var(--surface-3)' : 'transparent',
+                color: range === r ? 'var(--ink)' : 'var(--ink-3)',
+                border: '1px solid var(--line)',
+              }}
             >
               {r}
             </button>
@@ -194,33 +228,45 @@ function PortTrafficGraph({
         </div>
       </div>
 
+      <div className="flex gap-6 mb-3 shrink-0">
+        <div>
+          <div className="mono text-[10px] uppercase tracking-widest" style={{ color: 'var(--ink-4)' }}>RX peak</div>
+          <div className="mono num-tab text-[18px] font-semibold" style={{ color: 'var(--accent)' }}>{formatBps(rxPeak)}</div>
+        </div>
+        <div>
+          <div className="mono text-[10px] uppercase tracking-widest" style={{ color: 'var(--ink-4)' }}>TX peak</div>
+          <div className="mono num-tab text-[18px] font-semibold" style={{ color: 'var(--violet)' }}>{formatBps(txPeak)}</div>
+        </div>
+      </div>
+
       {isLoading ? (
-        <div className="flex-1 min-h-[200px] flex items-center justify-center text-gray-400 dark:text-slate-500 text-sm">
+        <div className="flex-1 min-h-[160px] flex items-center justify-center mono text-[12px]" style={{ color: 'var(--ink-4)' }}>
           Loading traffic data…
         </div>
       ) : trafficData.length === 0 ? (
-        <div className="flex-1 min-h-[200px] flex items-center justify-center text-gray-400 dark:text-slate-500 text-sm">
-          No traffic data yet for {portName} in the selected range
+        <div className="flex-1 min-h-[160px] flex items-center justify-center mono text-[12px]" style={{ color: 'var(--ink-4)' }}>
+          No traffic data for {portName} in this range
         </div>
       ) : (
-        <div className="flex-1 min-h-[200px]">
+        <div className="flex-1 min-h-[160px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={trafficData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-              <XAxis dataKey="time" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-              <YAxis tickFormatter={formatBps} tick={{ fontSize: 10 }} width={72} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" opacity={0.5} />
+              <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--ink-4)' }} interval="preserveStartEnd" />
+              <YAxis tickFormatter={formatBps} tick={{ fontSize: 10, fill: 'var(--ink-4)' }} width={72} />
               <Tooltip
                 formatter={(v) => formatBps(v as number)}
                 contentStyle={{
-                  background: 'var(--color-surface)',
-                  border: '1px solid var(--color-border)',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--line)',
                   borderRadius: '8px',
                   fontSize: '12px',
+                  color: 'var(--ink)',
                 }}
               />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Line type="monotone" dataKey="rx" stroke="#3b82f6" name="RX (download)" dot={false} strokeWidth={2} />
-              <Line type="monotone" dataKey="tx" stroke="#10b981" name="TX (upload)" dot={false} strokeWidth={2} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="rx" stroke="var(--accent)" name="RX" dot={false} strokeWidth={1.6} />
+              <Line type="monotone" dataKey="tx" stroke="var(--violet)" name="TX" dot={false} strokeWidth={1.6} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -343,24 +389,23 @@ function PortInfoCard({ deviceId, portName }: { deviceId: number; portName: stri
 
   const isSfp = d['sfp-module-present'] === 'true';
 
-  const infoRow = (label: string, value: string | undefined) => {
+  const infoRow = (label: string, value: string | undefined, valueColor?: string) => {
     if (!value || value === '' || value === 'none' || value === '0') return null;
+    const isStatus = label === 'Status';
+    const statusColor = isStatus ? (value.includes('ok') || value === 'true' ? 'var(--good)' : value.includes('err') ? 'var(--bad)' : 'var(--ink-2)') : undefined;
     return (
-      <div key={label} className="flex justify-between items-start py-1 border-b border-gray-100 dark:border-slate-700 last:border-0">
-        <span className="text-xs text-gray-500 dark:text-slate-400 shrink-0 mr-2">{label}</span>
-        <span className="text-xs font-medium text-gray-900 dark:text-white text-right font-mono">{value}</span>
+      <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--line-soft)' }}>
+        <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>{label}</span>
+        <span className="mono" style={{ color: valueColor ?? statusColor ?? 'var(--ink-2)', fontSize: 12, textAlign: 'right' }}>{value}</span>
       </div>
     );
   };
 
   return (
     <div className="card p-4 overflow-y-auto">
-      <div className="flex items-center gap-2 mb-3">
-        <Cpu className="w-4 h-4 text-blue-500" />
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Port Information</h3>
-      </div>
+      <div className="text-[13px] font-semibold mb-3" style={{ color: 'var(--ink)' }}>Port info</div>
 
-      <div className="space-y-0">
+      <div>
         {infoRow('Status', d['status'])}
         {infoRow('Rate', d['rate'])}
         {infoRow('Full Duplex', d['full-duplex'])}
@@ -372,8 +417,8 @@ function PortInfoCard({ deviceId, portName }: { deviceId: number; portName: stri
 
       {isSfp && (
         <>
-          <div className="mt-3 mb-2 pt-2 border-t border-gray-200 dark:border-slate-600">
-            <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">SFP Optic</span>
+          <div style={{ marginTop: 12, marginBottom: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+            <span className="mono text-[10px] uppercase tracking-widest" style={{ color: 'var(--accent)' }}>SFP Optic</span>
           </div>
           <div className="space-y-0">
             {infoRow('Type', d['sfp-type'])}
@@ -748,373 +793,184 @@ export default function SwitchPortDiagram({ deviceId, autoOpenBridge, onBridgeOp
 
   return (
     <div className="space-y-4">
-      {/* Selection info bar */}
-      {selectedPorts.size > 0 && (
-        <div className="flex items-center gap-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
-          <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
-            {selectedPorts.size} port{selectedPorts.size > 1 ? 's' : ''} selected:{' '}
-            {Array.from(selectedPorts).join(', ')}
-          </span>
-          <button
-            className="ml-auto text-xs text-blue-500 hover:text-blue-700"
-            onClick={() => setSelectedPorts(new Set())}
-          >
-            Clear
-          </button>
-          {canWrite && selectedPorts.size === 1 && (() => {
-            const port = ports.find((p) => p.name === Array.from(selectedPorts)[0]);
-            return port ? (
-              <button className="btn-primary text-xs py-1" onClick={() => openEditPanel(port)}>
-                Configure
-              </button>
-            ) : null;
-          })()}
-          {canWrite && selectedPorts.size >= 2 && (() => {
-            const selArr = Array.from(selectedPorts).map(n => ports.find(p => p.name === n)).filter((p): p is SwitchPort => !!p);
-            const allEligible = selArr.every(p => !isBridge(p) && !isBond(p) && !bondMemberMap.has(p.name));
-            if (!allEligible) return null;
-            return (
+      {/* Selection bar */}
+      {selectedPorts.size > 0 && (() => {
+        const singlePort = selectedPorts.size === 1 ? ports.find(p => p.name === Array.from(selectedPorts)[0]) : null;
+        const selArr = Array.from(selectedPorts).map(n => ports.find(p => p.name === n)).filter((p): p is SwitchPort => !!p);
+        const allEligible = selArr.every(p => !isBridge(p) && !isBond(p) && !bondMemberMap.has(p.name));
+        return (
+          <div style={{
+            background: 'var(--accent-soft)', border: '1px solid var(--accent)',
+            borderRadius: 8, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: 999, background: 'var(--accent)', flexShrink: 0, boxShadow: '0 0 0 2px var(--accent)33, 0 0 8px var(--accent)88' }} />
+            <span className="mono text-[12px]" style={{ color: 'var(--accent)' }}>
+              {selectedPorts.size === 1 ? Array.from(selectedPorts)[0] : `${selectedPorts.size} ports`}
+            </span>
+            {singlePort && (
+              <span className="text-[12px]" style={{ color: 'var(--ink-2)' }}>
+                selected{singlePort.speed ? ` · ${singlePort.speed}` : ''}{singlePort.mtu ? ` · ${singlePort.mtu} MTU` : ''}{singlePort.running ? ' · link-ok' : ' · link-down'}
+              </span>
+            )}
+            <div style={{ flex: 1 }} />
+            <button
+              className="text-[11px]"
+              style={{ padding: '5px 10px', borderRadius: 5, background: 'transparent', color: 'var(--ink-3)', border: '1px solid var(--line)' }}
+              onClick={() => setSelectedPorts(new Set())}
+            >Clear</button>
+            {canWrite && singlePort && (
               <button
-                className="btn-secondary text-xs py-1 flex items-center gap-1.5"
+                className="btn-primary text-[11px]"
+                style={{ padding: '5px 10px' }}
+                onClick={() => openEditPanel(singlePort)}
+              >Configure</button>
+            )}
+            {canWrite && selectedPorts.size >= 2 && allEligible && (
+              <button
+                className="btn-secondary text-[11px] flex items-center gap-[6px]"
+                style={{ padding: '5px 10px' }}
                 onClick={() => {
-                  setCreateTrunkForm({
-                    name: `bond${bondPorts.length + 1}`,
-                    mode: '802.3ad',
-                    lacp_rate: 'slow',
-                    transmit_hash_policy: '',
-                    mtu: '',
-                    min_links: '',
-                  });
+                  setCreateTrunkForm({ name: `bond${bondPorts.length + 1}`, mode: '802.3ad', lacp_rate: 'slow', transmit_hash_policy: '', mtu: '', min_links: '' });
                   setBondError('');
                   setShowCreateTrunkModal(true);
                 }}
               >
-                <Link2 className="w-3.5 h-3.5" /> Create Trunk
+                <Link2 className="w-3 h-3" /> Create Trunk
               </button>
-            );
-          })()}
-        </div>
-      )}
+            )}
+          </div>
+        );
+      })()}
 
-      {/* SVG switch chassis */}
-      <div className="card p-4 overflow-x-auto">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            Switch Ports ({ports.length} total)
-          </h3>
-          <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-slate-400">
-            {[['bg-green-500', 'Up'], ['bg-red-500', 'Down'], ['bg-slate-500', 'Disabled'], ['bg-blue-500', 'Selected']].map(([cls, label]) => (
-              <span key={label} className="flex items-center gap-1.5">
-                <span className={`w-3 h-3 rounded-sm ${cls}`} />{label}
-              </span>
-            ))}
+      {/* Faceplate card */}
+      <div className="card" style={{ padding: '22px 26px', position: 'relative', overflow: 'hidden' }}>
+        {/* Pinstripe overlay */}
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 9px, rgba(255,255,255,0.015) 9px, rgba(255,255,255,0.015) 10px)' }} />
+        <div style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 18 }}>
+            <div>
+              <div className="text-[13px] font-semibold" style={{ color: 'var(--ink)' }}>
+                Switch faceplate · {ports.length} ports
+              </div>
+              <div className="mono text-[11px] mt-[2px]" style={{ color: 'var(--ink-3)' }}>
+                click to select · shift for multi · double-click to configure
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 14 }}>
+              {([['up', 'var(--accent)', ports.filter(p => !p.disabled && p.running).length], ['down', 'var(--bad)', ports.filter(p => !p.disabled && !p.running).length], ['disabled', 'var(--ink-4)', ports.filter(p => p.disabled).length], ['selected', 'var(--accent)', selectedPorts.size]] as [string,string,number][]).map(([l, c, n]) => (
+                <span key={l} className="mono text-[11px]" style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--ink-3)' }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: c, opacity: l === 'disabled' ? 0.4 : 1, flexShrink: 0 }} />
+                  {l} <span className="num-tab" style={{ color: 'var(--ink-2)' }}>{n}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Rack unit */}
+          <div style={{
+            background: 'linear-gradient(180deg, var(--faceplate-from), var(--faceplate-to))',
+            border: '1px solid var(--faceplate-border)', borderRadius: 8, padding: '22px 26px',
+            display: 'flex', gap: 30, alignItems: 'center', overflowX: 'auto',
+            boxShadow: 'inset 0 0 0 2px var(--faceplate-inset), inset 0 1px 0 rgba(255,255,255,0.02)',
+          }}>
+            {/* ETH group */}
+            {etherPorts.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                <div className="mono" style={{ fontSize: 10, color: 'var(--ink-4)', letterSpacing: '.1em' }}>ETH</div>
+                {doubleRow ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {topRowPorts.map(port => (
+                        <PortTile key={port.name} port={port} selected={selectedPorts.has(port.name)} hovered={hoveredPort === port.name} isMember={bondMemberMap.has(port.name)} onClick={e => togglePort(port.name, e)} onMouseEnter={() => setHoveredPort(port.name)} onMouseLeave={() => setHoveredPort(null)} onDoubleClick={() => canWrite && openEditPanel(port)} />
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {bottomRowPorts.map(port => (
+                        <PortTile key={port.name} port={port} selected={selectedPorts.has(port.name)} hovered={hoveredPort === port.name} isMember={bondMemberMap.has(port.name)} onClick={e => togglePort(port.name, e)} onMouseEnter={() => setHoveredPort(port.name)} onMouseLeave={() => setHoveredPort(null)} onDoubleClick={() => canWrite && openEditPanel(port)} />
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {topRowPorts.map(port => (
+                      <PortTile key={port.name} port={port} selected={selectedPorts.has(port.name)} hovered={hoveredPort === port.name} isMember={bondMemberMap.has(port.name)} onClick={e => togglePort(port.name, e)} onMouseEnter={() => setHoveredPort(port.name)} onMouseLeave={() => setHoveredPort(null)} onDoubleClick={() => canWrite && openEditPanel(port)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SFP group */}
+            {individualSfpPorts.length > 0 && (
+              <div>
+                <div className="mono" style={{ fontSize: 10, color: 'var(--ink-4)', letterSpacing: '.1em', marginBottom: 6 }}>
+                  SFP · 1–{individualSfpPorts.length}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxWidth: individualSfpPorts.length * 52 }}>
+                  {individualSfpPorts.map(port => (
+                    <PortTile key={port.name} port={port} selected={selectedPorts.has(port.name)} hovered={hoveredPort === port.name} onClick={e => togglePort(port.name, e)} onMouseEnter={() => setHoveredPort(port.name)} onMouseLeave={() => setHoveredPort(null)} onDoubleClick={() => canWrite && openEditPanel(port)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* QSFP cages */}
+            {qsfpCages.map(cage => {
+              const isSingleMode = !!cage.singlePort;
+              const laneCount = isSingleMode ? 4 : cage.lanes.length;
+              const runningLanes = cage.lanes.filter(p => p.running && !p.disabled).length;
+              const isSingleCable = !isSingleMode && runningLanes === 1;
+              const refPort = cage.singlePort ?? cage.lanes[0];
+              return (
+                <div key={cage.key}>
+                  <div className="mono" style={{ fontSize: 10, color: 'var(--ink-4)', letterSpacing: '.1em', marginBottom: 6 }}>{cage.label}</div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {Array.from({ length: laneCount }, (_, li) => {
+                      const lane = isSingleMode ? cage.singlePort! : cage.lanes[li];
+                      const visualPort: SwitchPort = (isSingleMode || isSingleCable) ? { ...refPort, running: refPort.running, disabled: refPort.disabled } : lane;
+                      return (
+                        <PortTile key={li} port={visualPort} selected={selectedPorts.has(lane.name)} hovered={hoveredPort === lane.name} onClick={e => togglePort(lane.name, e)} onMouseEnter={() => setHoveredPort(lane.name)} onMouseLeave={() => setHoveredPort(null)} onDoubleClick={() => canWrite && openEditPanel(lane)} />
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Bridge group */}
+            {bridgePorts.length > 0 && (
+              <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                <div className="mono" style={{ fontSize: 10, color: 'var(--ink-4)', letterSpacing: '.1em' }}>BRIDGE</div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {bridgePorts.map(port => (
+                    <PortTile key={port.name} port={port} selected={selectedPorts.has(port.name)} hovered={hoveredPort === port.name} onClick={e => togglePort(port.name, e)} onMouseEnter={() => setHoveredPort(port.name)} onMouseLeave={() => setHoveredPort(null)} onDoubleClick={() => canWrite && openEditPanel(port)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Bond group */}
+            {bondPorts.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                <div className="mono" style={{ fontSize: 10, color: 'var(--ink-4)', letterSpacing: '.1em' }}>BOND</div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {bondPorts.map(port => (
+                    <PortTile key={port.name} port={port} selected={selectedPorts.has(port.name)} hovered={hoveredPort === port.name} onClick={e => togglePort(port.name, e)} onMouseEnter={() => setHoveredPort(port.name)} onMouseLeave={() => setHoveredPort(null)} onDoubleClick={() => canWrite && openEditPanel(port)} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        <svg
-          width={chassisW}
-          height={chassisH}
-          className="overflow-visible"
-        >
-          {/* Chassis body */}
-          <rect x={0} y={0} width={chassisW} height={chassisH} rx={8} fill="currentColor" className="text-gray-800 dark:text-slate-700" />
-          <text x={PAD} y={14} fill="#94a3b8" fontSize={9} fontFamily="monospace">PORTS</text>
-
-          {/* SFP section divider and label */}
-          {sfpPorts.length > 0 && (
-            <>
-              <line
-                x1={etherSectionW + sfpDivider / 2} y1={16}
-                x2={etherSectionW + sfpDivider / 2} y2={chassisH - 12}
-                stroke="#475569" strokeWidth={1} strokeDasharray="3,3"
-              />
-              <text x={etherSectionW + sfpDivider / 2 + 4} y={14} fill="#94a3b8" fontSize={9} fontFamily="monospace">SFP</text>
-            </>
-          )}
-
-          {topRowPorts.map((port, i) => {
-            const x = PAD + i * (PORT_W + GAP);
-            const y = topRowY;
-            const selected = selectedPorts.has(port.name);
-            const hovered = hoveredPort === port.name;
-            const isMember = bondMemberMap.has(port.name);
-            return (
-              <g key={port.name} className="cursor-pointer"
-                onClick={(e) => togglePort(port.name, e)}
-                onMouseEnter={() => setHoveredPort(port.name)}
-                onMouseLeave={() => setHoveredPort(null)}
-                onDoubleClick={() => canWrite && openEditPanel(port)}
-              >
-                <rect x={x} y={y} width={PORT_W} height={PORT_H} rx={3}
-                  fill={portColor(port, selected)}
-                  stroke={isMember && !selected ? '#d97706' : portBorderColor(port, selected)}
-                  strokeWidth={selected ? 2 : isMember ? 2 : 1}
-                  strokeDasharray={isMember && !selected ? '4,2' : undefined}
-                  opacity={hovered ? 0.85 : 1}
-                />
-                <text x={x + PORT_W / 2} y={y + PORT_H / 2 + 4} textAnchor="middle" fill="white"
-                  fontSize={10} fontWeight="600" fontFamily="monospace">
-                  {portLabel(port.name)}
-                </text>
-                {hovered && (
-                  <foreignObject x={Math.max(0, x - 50)} y={y - 78} width={210} height={90}>
-                    <PortTooltip port={port} />
-                  </foreignObject>
-                )}
-              </g>
-            );
-          })}
-
-          {bottomRowPorts.map((port, i) => {
-            const x = PAD + i * (PORT_W + GAP);
-            const y = bottomRowY;
-            const selected = selectedPorts.has(port.name);
-            const hovered = hoveredPort === port.name;
-            const isMember = bondMemberMap.has(port.name);
-            return (
-              <g key={port.name} className="cursor-pointer"
-                onClick={(e) => togglePort(port.name, e)}
-                onMouseEnter={() => setHoveredPort(port.name)}
-                onMouseLeave={() => setHoveredPort(null)}
-                onDoubleClick={() => canWrite && openEditPanel(port)}
-              >
-                <rect x={x} y={y} width={PORT_W} height={PORT_H} rx={3}
-                  fill={portColor(port, selected)}
-                  stroke={isMember && !selected ? '#d97706' : portBorderColor(port, selected)}
-                  strokeWidth={selected ? 2 : isMember ? 2 : 1}
-                  strokeDasharray={isMember && !selected ? '4,2' : undefined}
-                  opacity={hovered ? 0.85 : 1}
-                />
-                <text x={x + PORT_W / 2} y={y + PORT_H / 2 + 4} textAnchor="middle" fill="white"
-                  fontSize={10} fontWeight="600" fontFamily="monospace">
-                  {portLabel(port.name)}
-                </text>
-                {hovered && (
-                  <foreignObject x={Math.max(0, x - 50)} y={chassisH} width={210} height={90}>
-                    <PortTooltip port={port} />
-                  </foreignObject>
-                )}
-              </g>
-            );
-          })}
-
-          {individualSfpPorts.map((port, i) => {
-            const x = sfpStartX + i * (PORT_W + GAP);
-            const y = sfpY;
-            const selected = selectedPorts.has(port.name);
-            const hovered = hoveredPort === port.name;
-            return (
-              <g key={port.name} className="cursor-pointer"
-                onClick={(e) => togglePort(port.name, e)}
-                onMouseEnter={() => setHoveredPort(port.name)}
-                onMouseLeave={() => setHoveredPort(null)}
-                onDoubleClick={() => canWrite && openEditPanel(port)}
-              >
-                <rect x={x} y={y} width={PORT_W} height={PORT_H} rx={3}
-                  fill={portColor(port, selected)} stroke={portBorderColor(port, selected)}
-                  strokeWidth={selected ? 2 : 1}
-                  strokeDasharray="3,2"
-                  opacity={hovered ? 0.85 : 1}
-                />
-                <text x={x + PORT_W / 2} y={y + PORT_H / 2 + 4} textAnchor="middle" fill="white"
-                  fontSize={10} fontWeight="600" fontFamily="monospace">
-                  {portLabel(port.name)}
-                </text>
-                {hovered && (
-                  <foreignObject x={Math.max(0, x - 50)} y={sfpY - 78} width={210} height={90}>
-                    <PortTooltip port={port} />
-                  </foreignObject>
-                )}
-              </g>
-            );
-          })}
-
-          {/* QSFP section divider, label, and cage groups */}
-          {qsfpCages.length > 0 && (
-            <>
-              <line
-                x1={qsfpStartX - qsfpDivider / 2} y1={16}
-                x2={qsfpStartX - qsfpDivider / 2} y2={chassisH - 12}
-                stroke="#475569" strokeWidth={1} strokeDasharray="3,3"
-              />
-              <text x={qsfpStartX - qsfpDivider / 2 + 4} y={14} fill="#94a3b8" fontSize={9} fontFamily="monospace">QSFP</text>
-            </>
-          )}
-
-          {qsfpCages.map((cage) => {
-            // Single-mode cage: 4 virtual lanes all sharing the one port's status.
-            // Breakout cage: real lanes, BUT if only 1 lane is running treat as single-cable
-            // connection and show all lanes green.
-            const isSingleMode = !!cage.singlePort;
-            const laneCount = isSingleMode ? 4 : cage.lanes.length;
-            const runningLanes = cage.lanes.filter(p => p.running && !p.disabled).length;
-            const isSingleCable = !isSingleMode && runningLanes === 1;
-
-            const cageW = getCageW(laneCount);
-            const prevW = qsfpCages.slice(0, qsfpCages.indexOf(cage))
-              .reduce((acc, c) => acc + getCageW(c.singlePort ? 4 : c.lanes.length) + GAP, 0);
-            const cageX = qsfpStartX + prevW;
-            const cageY = sfpY;
-
-            const refPort = cage.singlePort ?? cage.lanes[0];
-            const anySelected = cage.singlePort
-              ? selectedPorts.has(cage.singlePort.name)
-              : cage.lanes.some(p => selectedPorts.has(p.name));
-
-            return (
-              <g key={cage.key}>
-                {/* Outer cage outline */}
-                <rect x={cageX} y={cageY} width={cageW} height={PORT_H} rx={3}
-                  fill={anySelected ? 'rgba(59,130,246,0.12)' : 'rgba(71,85,105,0.25)'}
-                  stroke={anySelected ? '#3b82f6' : '#64748b'}
-                  strokeWidth={anySelected ? 1.5 : 1}
-                />
-                {/* Cage name label */}
-                <text x={cageX + cageW / 2} y={cageY + CAGE_LABEL_H - 2}
-                  textAnchor="middle" fill="#94a3b8" fontSize={8} fontFamily="monospace">
-                  {cage.label}
-                </text>
-                {/* Lane ports */}
-                {Array.from({ length: laneCount }, (_, li) => {
-                  // For single-mode or single-cable: all lanes mirror the reference port
-                  const lane = isSingleMode ? cage.singlePort! : cage.lanes[li];
-                  // In single-cable mode, override visual status to show all as "up"
-                  const visualPort: SwitchPort = (isSingleMode || isSingleCable)
-                    ? { ...refPort, running: refPort.running, disabled: refPort.disabled }
-                    : lane;
-
-                  const laneX = cageX + CAGE_PAD_X + li * (LANE_W + LANE_GAP);
-                  const laneY = cageY + CAGE_LABEL_H;
-                  const laneSelected = selectedPorts.has(lane.name);
-                  const laneHovered = hoveredPort === lane.name;
-
-                  return (
-                    <g key={li} className="cursor-pointer"
-                      onClick={(e) => togglePort(lane.name, e)}
-                      onMouseEnter={() => setHoveredPort(lane.name)}
-                      onMouseLeave={() => setHoveredPort(null)}
-                      onDoubleClick={() => canWrite && openEditPanel(lane)}
-                    >
-                      <rect x={laneX} y={laneY} width={LANE_W} height={CAGE_LANE_H} rx={2}
-                        fill={portColor(visualPort, laneSelected)}
-                        stroke={portBorderColor(visualPort, laneSelected)}
-                        strokeWidth={laneSelected ? 2 : 1}
-                        opacity={laneHovered ? 0.8 : 1}
-                      />
-                      <text x={laneX + LANE_W / 2} y={laneY + CAGE_LANE_H / 2 + 3}
-                        textAnchor="middle" fill="white" fontSize={9} fontWeight="600" fontFamily="monospace">
-                        {isSingleMode ? String(li + 1) : lane.name.split('-').pop()}
-                      </text>
-                      {laneHovered && (
-                        <foreignObject x={Math.max(0, laneX - 60)} y={cageY - 78} width={210} height={90}>
-                          <PortTooltip port={lane} />
-                        </foreignObject>
-                      )}
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          })}
-
-          {/* Bridge section divider and label */}
-          {bridgePorts.length > 0 && (
-            <>
-              <line
-                x1={bridgeStartX - bridgeDivider / 2} y1={16}
-                x2={bridgeStartX - bridgeDivider / 2} y2={chassisH - 12}
-                stroke="#475569" strokeWidth={1} strokeDasharray="3,3"
-              />
-              <text x={bridgeStartX - bridgeDivider / 2 + 4} y={14} fill="#94a3b8" fontSize={9} fontFamily="monospace">BRIDGE</text>
-            </>
-          )}
-
-          {bridgePorts.map((port, i) => {
-            const x = bridgeStartX + i * (PORT_W + GAP);
-            const y = bridgeY;
-            const selected = selectedPorts.has(port.name);
-            const hovered = hoveredPort === port.name;
-            return (
-              <g key={port.name} className="cursor-pointer"
-                onClick={(e) => togglePort(port.name, e)}
-                onMouseEnter={() => setHoveredPort(port.name)}
-                onMouseLeave={() => setHoveredPort(null)}
-                onDoubleClick={() => canWrite && openEditPanel(port)}
-              >
-                <rect x={x} y={y} width={PORT_W} height={PORT_H} rx={3}
-                  fill={portColor(port, selected)} stroke={portBorderColor(port, selected)}
-                  strokeWidth={selected ? 2 : 1}
-                  strokeDasharray="5,3"
-                  opacity={hovered ? 0.85 : 1}
-                />
-                <text x={x + PORT_W / 2} y={y + PORT_H / 2 + 4} textAnchor="middle" fill="white"
-                  fontSize={10} fontWeight="600" fontFamily="monospace">
-                  {portLabel(port.name)}
-                </text>
-                {hovered && (
-                  <foreignObject x={Math.max(0, x - 50)} y={bridgeY - 78} width={210} height={90}>
-                    <PortTooltip port={port} />
-                  </foreignObject>
-                )}
-              </g>
-            );
-          })}
-
-          {/* Bond section divider and label */}
-          {bondPorts.length > 0 && (
-            <>
-              <line
-                x1={bondStartX - bondDivider / 2} y1={16}
-                x2={bondStartX - bondDivider / 2} y2={chassisH - 12}
-                stroke="#475569" strokeWidth={1} strokeDasharray="3,3"
-              />
-              <text x={bondStartX - bondDivider / 2 + 4} y={14} fill="#94a3b8" fontSize={9} fontFamily="monospace">BOND</text>
-            </>
-          )}
-
-          {bondPorts.map((port, i) => {
-            const x = bondStartX + i * (PORT_W + GAP);
-            const y = bridgeY;
-            const selected = selectedPorts.has(port.name);
-            const hovered = hoveredPort === port.name;
-            return (
-              <g key={port.name} className="cursor-pointer"
-                onClick={(e) => togglePort(port.name, e)}
-                onMouseEnter={() => setHoveredPort(port.name)}
-                onMouseLeave={() => setHoveredPort(null)}
-                onDoubleClick={() => canWrite && openEditPanel(port)}
-              >
-                <rect x={x} y={y} width={PORT_W} height={PORT_H} rx={3}
-                  fill={portColor(port, selected)} stroke={portBorderColor(port, selected)}
-                  strokeWidth={selected ? 2 : 1}
-                  strokeDasharray="6,2"
-                  opacity={hovered ? 0.85 : 1}
-                />
-                <text x={x + PORT_W / 2} y={y + PORT_H / 2 + 4} textAnchor="middle" fill="white"
-                  fontSize={10} fontWeight="600" fontFamily="monospace">
-                  {portLabel(port.name)}
-                </text>
-                {hovered && (
-                  <foreignObject x={Math.max(0, x - 50)} y={bridgeY - 78} width={210} height={90}>
-                    <PortTooltip port={port} />
-                  </foreignObject>
-                )}
-              </g>
-            );
-          })}
-        </svg>
-
-        <p className="text-xs text-gray-400 dark:text-slate-500 mt-3">
-          Click to select · Shift+click to multi-select · Double-click to configure
-        </p>
       </div>
 
-      {/* Port throughput graph + info card — shown when exactly one port is selected */}
+      {/* Port throughput + info — shown when exactly one port is selected */}
       {selectedPorts.size === 1 && (() => {
         const portName = Array.from(selectedPorts)[0];
         return (
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-stretch">
-            <div className="md:col-span-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+            <div className="md:col-span-1">
               <PortTrafficGraph
                 deviceId={deviceId}
                 portName={portName}
@@ -1122,7 +978,7 @@ export default function SwitchPortDiagram({ deviceId, autoOpenBridge, onBridgeOp
                 onRangeChange={setTrafficRange}
               />
             </div>
-            <div className="md:col-span-2">
+            <div className="md:col-span-1">
               <PortPacketGraph
                 deviceId={deviceId}
                 portName={portName}
@@ -1139,74 +995,74 @@ export default function SwitchPortDiagram({ deviceId, autoOpenBridge, onBridgeOp
       {/* Port table */}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 dark:border-slate-700">
-              <th className="table-header px-4 py-2.5 text-left">Port</th>
-              <th className="table-header px-4 py-2.5 text-left">Status</th>
-              <th className="table-header px-4 py-2.5 text-left">Speed</th>
-              <th className="table-header px-4 py-2.5 text-left">MTU</th>
-              <th className="table-header px-4 py-2.5 text-left">PVID</th>
-              <th className="table-header px-4 py-2.5 text-left">MAC</th>
-              <th className="table-header px-4 py-2.5 text-left">Comment</th>
-              <th className="table-header px-4 py-2.5 w-12" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-slate-700 table-zebra">
-            {sortedPorts.map((port) => (
-              <tr
-                key={port.name}
-                className={clsx(
-                  'hover:bg-gray-50 dark:hover:bg-slate-700/50 cursor-pointer',
-                  selectedPorts.has(port.name) && 'bg-blue-50 dark:bg-blue-900/20'
-                )}
-                onClick={(e) => togglePort(port.name, e)}
-              >
-                <td className="px-4 py-2 font-mono font-medium text-gray-900 dark:text-white">
-                  <div className="flex items-center gap-1.5">
-                    {port.name}
-                    {bondMemberMap.has(port.name) && (
-                      <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded font-sans">
-                        {bondMemberMap.get(port.name)}
-                      </span>
-                    )}
-                    {isBond(port) && (
-                      <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded font-sans">
-                        BOND
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-2">
-                  <span className={clsx(
-                    'inline-flex items-center gap-1 text-xs font-medium',
-                    port.disabled ? 'text-gray-500' : port.running ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'
-                  )}>
-                    <span className={clsx('w-1.5 h-1.5 rounded-full',
-                      port.disabled ? 'bg-gray-400' : port.running ? 'bg-green-500' : 'bg-red-500'
-                    )} />
-                    {port.disabled ? 'Disabled' : port.running ? 'Up' : 'Down'}
-                  </span>
-                </td>
-                <td className="px-4 py-2 text-gray-500 dark:text-slate-400">{port.speed || '—'}</td>
-                <td className="px-4 py-2 text-gray-500 dark:text-slate-400">{port.mtu || '—'}</td>
-                <td className="px-4 py-2 text-gray-500 dark:text-slate-400">{port.bridgeInfo?.pvid ?? '—'}</td>
-                <td className="px-4 py-2 font-mono text-xs text-gray-400 dark:text-slate-500">{port.mac_address || '—'}</td>
-                <td className="px-4 py-2 text-gray-500 dark:text-slate-400">{port.comment || '—'}</td>
-                <td className="px-4 py-2">
-                  {canWrite && (
-                    <button
-                      className="p-1 rounded text-gray-400 hover:text-blue-500 transition-colors"
-                      onClick={(e) => { e.stopPropagation(); openEditPanel(port); }}
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </td>
+          <table className="w-full">
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--line)' }}>
+                {['PORT', 'STATUS', 'SPEED', 'MTU', 'PVID', 'MAC', 'COMMENT', ''].map((h, i) => (
+                  <th key={i} className="table-header px-4 py-[10px] text-left">{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sortedPorts.map((port, i) => {
+                const state = portState(port);
+                const stateColor = state === 'up' ? 'var(--good)' : state === 'down' ? 'var(--bad)' : 'var(--ink-4)';
+                const isSelected = selectedPorts.has(port.name);
+                return (
+                  <tr
+                    key={port.name}
+                    className="cursor-pointer transition-colors"
+                    style={{
+                      borderBottom: i < sortedPorts.length - 1 ? '1px solid var(--line-soft)' : 'none',
+                      background: isSelected ? 'var(--accent-soft)' : 'transparent',
+                    }}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--surface-2)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = isSelected ? 'var(--accent-soft)' : 'transparent'; }}
+                    onClick={(e) => togglePort(port.name, e)}
+                  >
+                    <td className="px-4 py-[10px]">
+                      <div className="flex items-center gap-[6px]">
+                        <span className="mono text-[12px] font-medium" style={{ color: 'var(--ink)' }}>{port.name}</span>
+                        {bondMemberMap.has(port.name) && (
+                          <span className="mono text-[9.5px] px-[5px] py-[2px] rounded" style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}>
+                            {bondMemberMap.get(port.name)}
+                          </span>
+                        )}
+                        {isBond(port) && (
+                          <span className="mono text-[9.5px] px-[5px] py-[2px] rounded" style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}>BOND</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-[10px]">
+                      <span className="inline-flex items-center gap-[5px] mono text-[11px] font-medium" style={{ color: stateColor }}>
+                        <span style={{ width: 6, height: 6, borderRadius: 999, background: stateColor, flexShrink: 0 }} />
+                        {port.disabled ? 'Disabled' : port.running ? 'Up' : 'Down'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-[10px]"><span className="mono text-[11.5px]" style={{ color: 'var(--ink-3)' }}>{port.speed || '—'}</span></td>
+                    <td className="px-4 py-[10px]"><span className="mono num-tab text-[11.5px]" style={{ color: 'var(--ink-3)' }}>{port.mtu || '—'}</span></td>
+                    <td className="px-4 py-[10px]"><span className="mono num-tab text-[11.5px]" style={{ color: 'var(--ink-3)' }}>{port.bridgeInfo?.pvid ?? '—'}</span></td>
+                    <td className="px-4 py-[10px]"><span className="mono text-[11px]" style={{ color: 'var(--ink-4)' }}>{port.mac_address || '—'}</span></td>
+                    <td className="px-4 py-[10px]"><span className="text-[12px]" style={{ color: 'var(--ink-3)' }}>{port.comment || '—'}</span></td>
+                    <td className="px-4 py-[10px]">
+                      {canWrite && (
+                        <button
+                          className="p-1 rounded transition-colors"
+                          style={{ color: 'var(--ink-4)' }}
+                          onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent)')}
+                          onMouseLeave={e => (e.currentTarget.style.color = 'var(--ink-4)')}
+                          onClick={(e) => { e.stopPropagation(); openEditPanel(port); }}
+                          title="Configure"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 

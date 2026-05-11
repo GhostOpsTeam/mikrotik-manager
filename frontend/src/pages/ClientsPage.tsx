@@ -257,14 +257,14 @@ export default function ClientsPage() {
           <span className="text-xs text-green-600 dark:text-green-400">{purgeResult}</span>
         )}
         <div className="flex items-center gap-1.5 ml-auto">
-          <RefreshCw className="w-3.5 h-3.5 text-gray-400 dark:text-slate-500" />
+          <RefreshCw className="w-3.5 h-3.5 text-ink-4" />
           <select
             value={String(refreshInterval)}
             onChange={(e) => {
               const raw = e.target.value;
               handleIntervalChange(raw === 'null' ? null : Number(raw));
             }}
-            className="text-sm rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-700 dark:text-slate-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="text-sm rounded-lg border border-line bg-surface-2 text-ink px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent"
           >
             {REFRESH_OPTIONS.map((o) => (
               <option key={String(o.value)} value={String(o.value)}>
