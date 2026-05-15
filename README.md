@@ -13,7 +13,7 @@ A self-hosted, full-stack network management platform for MikroTik devices. Moni
 ## Screenshots
 
 <p align="center">
-  <img src=".github/images/Login%20Page.png" alt="Login Page" width="55%" />
+  <img src=".github/images/Login%20Page.png" alt="Login Page" width="100%" />
 </p>
 
 <br>
