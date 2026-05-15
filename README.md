@@ -2,7 +2,7 @@
 
 A self-hosted, full-stack network management platform for MikroTik devices. Monitor, configure, and manage your entire MikroTik infrastructure — routers, switches, and wireless access points — from a single web interface.
 
-![Version](https://img.shields.io/badge/version-0.10.9_Beta-blue)
+![Version](https://img.shields.io/badge/version-0.11.0_Beta-blue)
 ![License](https://img.shields.io/badge/license-AGPLv3-blue)
 ![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.3-3178C6?logo=typescript&logoColor=white)
@@ -108,6 +108,7 @@ A self-hosted, full-stack network management platform for MikroTik devices. Moni
 - Per-device notes, rack location, and physical address with map support
 - Device credential encryption at rest
 - **Bulk device add** — "Try All" discovered devices runs as a server-side background job (survives browser tab close) with live progress and cancel support
+- CPU load and historical sparkline displayed correctly for all device types, including hardware switches that report 0% CPU via ASIC offloading
 
 ### Routers
 - Routing table viewer
@@ -119,6 +120,7 @@ A self-hosted, full-stack network management platform for MikroTik devices. Moni
 - VLAN management (create, edit, delete VLANs)
 - Per-port configuration and VLAN membership
 - Switch overview with port status
+- **Copy VLANs from another switch** — 3-step wizard that copies VLAN IDs and names from any other managed switch onto the current device, with manual per-VLAN port assignment (tagged/untagged) using a click-to-cycle interface chip grid, conflict detection with per-VLAN skip/overwrite control, and a review summary before any changes are applied
 
 ### Wireless
 - Per-AP SSID management — create, edit, enable/disable, delete wireless interfaces

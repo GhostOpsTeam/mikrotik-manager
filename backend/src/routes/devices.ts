@@ -1364,6 +1364,55 @@ router.delete('/:id/vlans/:vlanDbId', requireWrite, async (req: Request, res: Re
   }
 });
 
+// POST /api/devices/:id/vlans/copy (bulk copy VLANs from another switch)
+router.post('/:id/vlans/copy', requireWrite, async (req: Request, res: Response) => {
+  const deviceRow = await queryOne<any>(
+    `SELECT id, ip_address, api_port, api_username, api_password_encrypted FROM devices WHERE id = $1`,
+    [req.params.id]
+  );
+  if (!deviceRow) return res.status(404).json({ error: 'Device not found' });
+
+  const { operations } = req.body as {
+    operations: Array<{
+      action: 'add' | 'update';
+      vlan_id: number;
+      bridge: string;
+      tagged_ports: string[];
+      untagged_ports: string[];
+    }>;
+  };
+
+  if (!Array.isArray(operations) || operations.length === 0) {
+    return res.status(400).json({ error: 'operations array is required and must not be empty' });
+  }
+
+  const collector = new DeviceCollector(deviceRow);
+  const results: Array<{ vlan_id: number; action: string; success: boolean; error?: string }> = [];
+
+  try {
+    await collector.connect();
+
+    for (const op of operations) {
+      try {
+        if (op.action === 'add') {
+          await collector.addBridgeVlan(op.bridge, op.vlan_id, op.tagged_ports, op.untagged_ports);
+        } else {
+          await collector.updateBridgeVlan(op.bridge, op.vlan_id, op.tagged_ports, op.untagged_ports);
+        }
+        results.push({ vlan_id: op.vlan_id, action: op.action, success: true });
+      } catch (err) {
+        results.push({ vlan_id: op.vlan_id, action: op.action, success: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    await collector.collectVlans();
+    const vlans = await query(`SELECT * FROM vlans WHERE device_id = $1 ORDER BY vlan_id ASC`, [req.params.id]);
+    return res.json({ results, vlans });
+  } finally {
+    collector.disconnect();
+  }
+});
+
 // ─── Bond (LAG / LACP) routes ────────────────────────────────────────────────
 
 // POST /api/devices/:id/bonds

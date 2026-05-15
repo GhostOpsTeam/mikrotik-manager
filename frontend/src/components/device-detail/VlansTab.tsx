@@ -1,17 +1,23 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, AlertCircle, RefreshCw, Pencil, Check, X, Network } from 'lucide-react';
+import { Plus, Trash2, AlertCircle, RefreshCw, Pencil, Check, X, Network, Copy } from 'lucide-react';
 import { devicesApi } from '../../services/api';
 import type { Vlan, SwitchPort } from '../../types';
 import clsx from 'clsx';
 import { useCanWrite } from '../../hooks/useCanWrite';
+import CopyVlanModal from './CopyVlanModal';
 
 interface PortForm {
   tagged_ports: string;
   untagged_ports: string;
 }
 
-export default function VlansTab({ deviceId, onGoToPorts }: { deviceId: number; onGoToPorts?: (bridgeName: string) => void }) {
+export default function VlansTab({ deviceId, deviceName, deviceType, onGoToPorts }: {
+  deviceId: number;
+  deviceName?: string;
+  deviceType?: string;
+  onGoToPorts?: (bridgeName: string) => void;
+}) {
   const queryClient = useQueryClient();
   const canWrite = useCanWrite();
 
@@ -31,6 +37,9 @@ export default function VlansTab({ deviceId, onGoToPorts }: { deviceId: number; 
   const bridgesWithoutFiltering = ports.filter(
     (p) => p.type === 'bridge' && p.config_json?.['vlan-filtering'] !== 'yes' && p.config_json?.['vlan-filtering'] !== 'true'
   );
+
+  // ── Copy VLAN modal ──
+  const [showCopyModal, setShowCopyModal] = useState(false);
 
   // ── Add form ──
   const [showAdd, setShowAdd] = useState(false);
@@ -158,6 +167,16 @@ export default function VlansTab({ deviceId, onGoToPorts }: { deviceId: number; 
             <RefreshCw className={clsx('w-3.5 h-3.5', isFetching && 'animate-spin')} />
             Refresh
           </button>
+          {canWrite && deviceType === 'switch' && (
+            <button
+              onClick={() => setShowCopyModal(true)}
+              className="btn-secondary flex items-center gap-2 text-sm"
+              title="Copy VLANs from another switch"
+            >
+              <Copy className="w-4 h-4" />
+              Copy from Switch
+            </button>
+          )}
           {canWrite && (
             <button
               onClick={() => {
@@ -310,6 +329,17 @@ export default function VlansTab({ deviceId, onGoToPorts }: { deviceId: number; 
             <button onClick={() => setEditingVlan(null)} className="btn-secondary text-sm">Cancel</button>
           </div>
         </div>
+      )}
+
+      {showCopyModal && (
+        <CopyVlanModal
+          deviceId={deviceId}
+          deviceName={deviceName ?? `Device ${deviceId}`}
+          onClose={() => {
+            setShowCopyModal(false);
+            queryClient.invalidateQueries({ queryKey: ['vlans', deviceId] });
+          }}
+        />
       )}
 
       {/* VLANs table */}

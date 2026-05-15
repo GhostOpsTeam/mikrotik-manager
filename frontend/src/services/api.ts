@@ -197,6 +197,8 @@ export const devicesApi = {
   updateVlan: (id: number, vlanDbId: number, data: { tagged_ports: string[]; untagged_ports: string[] }) =>
     api.put(`/devices/${id}/vlans/${vlanDbId}`, data),
   deleteVlan: (id: number, vlanDbId: number) => api.delete(`/devices/${id}/vlans/${vlanDbId}`),
+  copyVlans: (id: number, operations: Array<{ action: 'add' | 'update'; vlan_id: number; bridge: string; tagged_ports: string[]; untagged_ports: string[] }>) =>
+    api.post<{ results: Array<{ vlan_id: number; action: string; success: boolean; error?: string }>; vlans: Vlan[] }>(`/devices/${id}/vlans/copy`, { operations }),
   reboot: (id: number) => api.post<{ message: string }>(`/devices/${id}/reboot`),
   getPortMonitor: (id: number, name: string) =>
     api.get<PortMonitorData>(`/devices/${id}/ports/${encodeURIComponent(name)}/monitor`),

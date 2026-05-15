@@ -306,6 +306,8 @@ export default function DeviceDetailPage() {
       {activeTab === 'vlans' && (
         <VlansTab
           deviceId={deviceId}
+          deviceName={device?.name}
+          deviceType={device?.device_type}
           onGoToPorts={(bridgeName) => { setAutoOpenBridge(bridgeName); setActiveTab('ports'); }}
         />
       )}

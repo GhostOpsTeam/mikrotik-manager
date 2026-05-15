@@ -165,7 +165,7 @@ export default function DevicesPage() {
     () => Object.fromEntries(
       devices.map((d, i) => {
         const pts = cpuHistoryResults[i]?.data ?? [];
-        return [d.id, pts.map((p: { cpu_load?: number }) => p.cpu_load ?? 0).filter((v: number) => v > 0)];
+        return [d.id, pts.filter((p: { cpu_load?: number }) => p.cpu_load != null).map((p: { cpu_load?: number }) => p.cpu_load as number)];
       })
     ) as Record<number, number[]>,
     [devices, cpuHistoryResults],
