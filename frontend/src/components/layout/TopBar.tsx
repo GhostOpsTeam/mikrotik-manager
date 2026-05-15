@@ -41,21 +41,6 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
-        {/* Live indicator */}
-        <span
-          className="hidden sm:flex items-center gap-[6px] px-[10px] py-[4px] rounded-full text-[11px] mono"
-          style={{ color: 'var(--ink-3)', border: '1px solid var(--line)' }}
-        >
-          <span
-            className="w-[6px] h-[6px] rounded-full flex-shrink-0"
-            style={{
-              background: 'var(--good)',
-              boxShadow: '0 0 0 2px rgba(141,224,138,0.2), 0 0 6px rgba(141,224,138,0.5)',
-            }}
-          />
-          live
-        </span>
-
         {/* Theme toggle */}
         <button
           onClick={toggleTheme}

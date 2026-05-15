@@ -44,10 +44,14 @@ function aggregateActions(
 ): AggregatedRow[] {
   const map = new Map<string, AggregatedRow>();
   for (const d of deviceData) {
+    const seenKeys = new Set<string>();
     for (const a of d.actions) {
       const key = a['name'] ?? '';
       if (!map.has(key)) map.set(key, { key, sample: a, coverage: [] });
-      map.get(key)!.coverage.push({ deviceId: d.deviceId, deviceName: d.deviceName, rowId: a['.id'] ?? '' });
+      if (!seenKeys.has(key)) {
+        map.get(key)!.coverage.push({ deviceId: d.deviceId, deviceName: d.deviceName, rowId: a['.id'] ?? '' });
+        seenKeys.add(key);
+      }
     }
   }
   return Array.from(map.values());
@@ -58,10 +62,14 @@ function aggregateRules(
 ): AggregatedRow[] {
   const map = new Map<string, AggregatedRow>();
   for (const d of deviceData) {
+    const seenKeys = new Set<string>();
     for (const r of d.rules) {
       const key = `${r['topics'] ?? ''}|${r['action'] ?? ''}`;
       if (!map.has(key)) map.set(key, { key, sample: r, coverage: [] });
-      map.get(key)!.coverage.push({ deviceId: d.deviceId, deviceName: d.deviceName, rowId: r['.id'] ?? '' });
+      if (!seenKeys.has(key)) {
+        map.get(key)!.coverage.push({ deviceId: d.deviceId, deviceName: d.deviceName, rowId: r['.id'] ?? '' });
+        seenKeys.add(key);
+      }
     }
   }
   return Array.from(map.values());
@@ -469,14 +477,25 @@ export default function NetworkServicesSyslogPage() {
       );
       targetNames = coverage.map(c => c.deviceName);
     } else {
+      // Skip devices that already have an identical action/rule to avoid duplicates
+      const devicesToAdd = onlineDevices.filter(d => {
+        const deviceSyslog = allDevicesSyslog.find(ds => ds.deviceId === d.id);
+        if (!deviceSyslog) return true;
+        if (type === 'action') {
+          const newName = data['name'] ?? '';
+          return !deviceSyslog.actions.some(a => (a['name'] ?? '') === newName);
+        }
+        const newKey = `${data['topics'] ?? ''}|${data['action'] ?? ''}`;
+        return !deviceSyslog.rules.some(r => `${r['topics'] ?? ''}|${r['action'] ?? ''}` === newKey);
+      });
       settled = await Promise.allSettled(
-        onlineDevices.map(d =>
+        devicesToAdd.map(d =>
           type === 'action'
             ? networkServicesApi.addSyslogAction(d.id, data)
             : networkServicesApi.addSyslogRule(d.id, data)
         )
       );
-      targetNames = onlineDevices.map(d => d.name);
+      targetNames = devicesToAdd.map(d => d.name);
     }
 
     setIsPushing(false); setPendingPush(null);
