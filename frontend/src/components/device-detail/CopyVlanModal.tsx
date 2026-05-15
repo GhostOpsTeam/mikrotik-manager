@@ -192,7 +192,10 @@ export default function CopyVlanModal({
     queryKey: ['ports', deviceId],
     queryFn: () => devicesApi.getPorts(deviceId).then((r) => r.data),
   });
-  const targetPorts: SwitchPort[] = targetPortsData?.ports ?? [];
+  const targetPorts = useMemo<SwitchPort[]>(
+    () => targetPortsData?.ports ?? [],
+    [targetPortsData]
+  );
 
   const targetBridgeNames = useMemo(
     () => targetPorts.filter((p) => p.type === 'bridge').map((p) => p.name).sort(naturalSort),
@@ -236,13 +239,6 @@ export default function CopyVlanModal({
         current === 'none' ? 'tagged' : current === 'tagged' ? 'untagged' : 'none';
       return { ...prev, [vlanId]: { ...(prev[vlanId] ?? {}), [portName]: next } };
     });
-  };
-
-  const setPortDirect = (vlanId: number, portName: string, value: PortAssignment) => {
-    setPortAssignments((prev) => ({
-      ...prev,
-      [vlanId]: { ...(prev[vlanId] ?? {}), [portName]: value },
-    }));
   };
 
   const getAssignment = (vlanId: number, portName: string): PortAssignment =>
@@ -329,7 +325,7 @@ export default function CopyVlanModal({
   const toggleVlan = (vlanId: number) =>
     setSelectedVlanIds((prev) => {
       const next = new Set(prev);
-      next.has(vlanId) ? next.delete(vlanId) : next.add(vlanId);
+      if (next.has(vlanId)) { next.delete(vlanId); } else { next.add(vlanId); }
       return next;
     });
 
@@ -514,7 +510,7 @@ export default function CopyVlanModal({
 
             {op.status === 'identical' && (
               <p className="text-xs text-gray-400 dark:text-slate-500">
-                Your port assignment matches what's already on this device — nothing to change.
+                Your port assignment matches what&apos;s already on this device — nothing to change.
               </p>
             )}
 
