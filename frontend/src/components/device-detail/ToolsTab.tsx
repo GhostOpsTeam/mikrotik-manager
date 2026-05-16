@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Play, Loader2, CheckCircle, XCircle, Wifi, RotateCcw } from 'lucide-react';
+import { Play, Loader2, CheckCircle, XCircle, Wifi, RotateCcw, Download, Activity } from 'lucide-react';
 import { deviceToolsApi, devicesApi } from '../../services/api';
 import clsx from 'clsx';
 import { useCanWrite } from '../../hooks/useCanWrite';
@@ -379,6 +379,167 @@ function RebootSection({ deviceId }: { deviceId: number }) {
   );
 }
 
+// ─── Packet Capture ───────────────────────────────────────────────────────────
+
+function PacketCaptureTool({ deviceId, interfaces }: { deviceId: number; interfaces: string[] }) {
+  const [iface, setIface] = useState(interfaces[0] || '');
+  const [filterIp, setFilterIp] = useState('');
+  const [duration, setDuration] = useState('10');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState('');
+  const [fileName, setFileName] = useState('');
+
+  const run = async () => {
+    setLoading(true); setError(''); setReady(false);
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    try {
+      const res = await deviceToolsApi.capture(deviceId, {
+        interface: iface || undefined,
+        filter_ip: filterIp.trim() || undefined,
+        duration: parseInt(duration) || 10,
+      });
+      const blob = new Blob([res.data as BlobPart], { type: 'application/vnd.tcpdump.pcap' });
+      const url = URL.createObjectURL(blob);
+      const name = `capture-${deviceId}-${Date.now()}.pcap`;
+      setDownloadUrl(url);
+      setFileName(name);
+      setReady(true);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setError(msg || (e as Error).message || 'Capture failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-gray-500 dark:text-slate-400">
+        Captures packets using the RouterOS sniffer and downloads a PCAP file you can open in Wireshark.
+        Requires SSH credentials on the device.
+      </p>
+      <div className="flex flex-wrap gap-3">
+        {interfaces.length > 0 && (
+          <select className="input w-44" value={iface} onChange={(e) => setIface(e.target.value)}>
+            <option value="">All interfaces</option>
+            {interfaces.map((i) => <option key={i} value={i}>{i}</option>)}
+          </select>
+        )}
+        <input
+          className="input flex-1 min-w-36"
+          placeholder="Filter IP (optional)"
+          value={filterIp}
+          onChange={(e) => setFilterIp(e.target.value)}
+        />
+        <select className="input w-28" value={duration} onChange={(e) => setDuration(e.target.value)}>
+          {[5, 10, 15, 30, 60].map((s) => <option key={s} value={s}>{s}s</option>)}
+        </select>
+        <RunButton loading={loading} onClick={run} label="Capture" />
+      </div>
+      {loading && (
+        <p className="text-sm text-gray-500 dark:text-slate-400">
+          Capturing for {duration}s — please wait…
+        </p>
+      )}
+      {error && <ErrorBox message={error} />}
+      {ready && downloadUrl && (
+        <a
+          href={downloadUrl}
+          download={fileName}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-medium transition-colors"
+        >
+          <Download className="w-4 h-4" />
+          Download {fileName}
+        </a>
+      )}
+    </div>
+  );
+}
+
+// ─── Bandwidth Test ───────────────────────────────────────────────────────────
+
+function BandwidthTestTool({ deviceId }: { deviceId: number }) {
+  const [address, setAddress] = useState('');
+  const [direction, setDirection] = useState('both');
+  const [duration, setDuration] = useState('5');
+  const [protocol, setProtocol] = useState('tcp');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ tx_mbps: number; rx_mbps: number; direction: string; protocol: string; duration: number } | null>(null);
+
+  const run = async () => {
+    if (!address) return;
+    setLoading(true); setError(''); setResult(null);
+    try {
+      const { data } = await deviceToolsApi.btest(deviceId, { address, direction, duration: parseInt(duration), protocol });
+      setResult(data);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setError(msg || (e as Error).message || 'Bandwidth test failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-gray-500 dark:text-slate-400">
+        Runs RouterOS /tool/bandwidth-test to measure throughput between this device and a target IP.
+        The target must have the bandwidth-test server enabled.
+      </p>
+      <div className="flex flex-wrap gap-3">
+        <input
+          className="input flex-1 min-w-48"
+          placeholder="Target IP address"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && run()}
+        />
+        <select className="input w-32" value={direction} onChange={(e) => setDirection(e.target.value)}>
+          <option value="both">Both</option>
+          <option value="receive">Receive</option>
+          <option value="transmit">Transmit</option>
+        </select>
+        <select className="input w-24" value={protocol} onChange={(e) => setProtocol(e.target.value)}>
+          <option value="tcp">TCP</option>
+          <option value="udp">UDP</option>
+        </select>
+        <select className="input w-24" value={duration} onChange={(e) => setDuration(e.target.value)}>
+          {[5, 10, 15, 30].map((s) => <option key={s} value={s}>{s}s</option>)}
+        </select>
+        <RunButton loading={loading} onClick={run} label="Test" />
+      </div>
+      {loading && (
+        <p className="text-sm text-gray-500 dark:text-slate-400">
+          Running {duration}s bandwidth test — please wait…
+        </p>
+      )}
+      {error && <ErrorBox message={error} />}
+      {result && (
+        <div className="grid grid-cols-2 gap-3">
+          {(result.direction === 'both' || result.direction === 'transmit') && (
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-center">
+              <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">{result.tx_mbps} Mbps</div>
+              <div className="text-xs text-blue-500 dark:text-blue-400 mt-1">TX (Upload)</div>
+            </div>
+          )}
+          {(result.direction === 'both' || result.direction === 'receive') && (
+            <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-center">
+              <div className="text-2xl font-bold text-green-700 dark:text-green-300">{result.rx_mbps} Mbps</div>
+              <div className="text-xs text-green-500 dark:text-green-400 mt-1">RX (Download)</div>
+            </div>
+          )}
+          <div className="col-span-2 text-xs text-gray-500 dark:text-slate-400 text-center">
+            {result.duration}s {result.protocol.toUpperCase()} test
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main tab ─────────────────────────────────────────────────────────────────
 
 function ToolCard({ title, icon: Icon, children }: { title: string; icon: React.FC<{ className?: string }>; children: React.ReactNode }) {
@@ -438,6 +599,18 @@ export default function ToolsTab({ deviceId }: { deviceId: number }) {
             Sends a WoL magic packet from this MikroTik device to wake a sleeping host on the network.
           </p>
           <WolTool deviceId={deviceId} interfaces={interfaceNames} />
+        </ToolCard>
+      )}
+
+      {canWrite && (
+        <ToolCard title="Packet Capture" icon={Download}>
+          <PacketCaptureTool deviceId={deviceId} interfaces={interfaceNames} />
+        </ToolCard>
+      )}
+
+      {canWrite && (
+        <ToolCard title="Bandwidth Test" icon={Activity}>
+          <BandwidthTestTool deviceId={deviceId} />
         </ToolCard>
       )}
     </div>

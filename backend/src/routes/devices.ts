@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
+import { Client as SshClient } from 'ssh2';
 import { query, queryOne } from '../config/database';
 import { requireAuth, requireWrite } from '../middleware/auth';
 import { encrypt, decrypt } from '../utils/crypto';
@@ -1766,6 +1767,111 @@ router.post('/:id/tools/wol', requireWrite, async (req: Request, res: Response) 
     await client.connect();
     await client.execute('/tool/wol', { mac, interface: iface });
     return res.json({ success: true, message: `WoL magic packet sent to ${mac} on ${iface}` });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  } finally {
+    client.disconnect();
+  }
+});
+
+// POST /api/devices/:id/tools/capture — packet capture via RouterOS sniffer + SFTP download
+router.post('/:id/tools/capture', requireWrite, async (req: Request, res: Response) => {
+  const { interface: iface, filter_ip, duration } = req.body as {
+    interface?: string; filter_ip?: string; duration?: number;
+  };
+  const captureSec = Math.min(Math.max(5, Number(duration) || 10), 60);
+
+  const device = await getToolDevice(req.params.id);
+  if (!device) return res.status(404).json({ error: 'Device not found' });
+  if (!device.ssh_username || !device.ssh_password_encrypted) {
+    return res.status(400).json({ error: 'SSH credentials required for packet capture. Add SSH username/password in device settings.' });
+  }
+
+  const fileName = `cap-${Date.now()}`;
+  const remotePath = `/flash/${fileName}.pcap`;
+  const client = makeToolClient(device);
+
+  try {
+    await client.connect();
+    const setParams: Record<string, string> = { 'file-name': fileName, 'file-limit': '10240' };
+    if (iface) setParams['interface'] = iface;
+    if (filter_ip) setParams['filter-ip-address'] = filter_ip;
+    await client.execute('/tool/sniffer/set', setParams);
+    await client.execute('/tool/sniffer/start');
+    await new Promise((r) => setTimeout(r, captureSec * 1000));
+    await client.execute('/tool/sniffer/stop').catch(() => {});
+    client.disconnect();
+
+    // Download PCAP via SFTP
+    const pcapBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const ssh = new SshClient();
+      ssh.on('ready', () => {
+        ssh.sftp((err, sftp) => {
+          if (err) { ssh.end(); return reject(err); }
+          const chunks: Buffer[] = [];
+          const stream = sftp.createReadStream(remotePath);
+          stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+          stream.on('end', () => { ssh.end(); resolve(Buffer.concat(chunks)); });
+          stream.on('error', (e: Error) => { ssh.end(); reject(e); });
+        });
+      });
+      ssh.on('error', reject);
+      ssh.connect({
+        host: device.ip_address,
+        port: device.ssh_port ?? 22,
+        username: device.ssh_username!,
+        password: decrypt(device.ssh_password_encrypted!),
+        readyTimeout: 10_000,
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.tcpdump.pcap');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.pcap"`);
+    return res.send(pcapBuffer);
+  } catch (err) {
+    client.disconnect();
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/devices/:id/tools/btest — bandwidth test via RouterOS
+router.post('/:id/tools/btest', requireWrite, async (req: Request, res: Response) => {
+  const { address, direction = 'both', duration = 5, protocol = 'tcp' } = req.body as {
+    address?: string; direction?: string; duration?: number; protocol?: string;
+  };
+  if (!address) return res.status(400).json({ error: 'address is required' });
+  const testSec = Math.min(Math.max(1, Number(duration) || 5), 30);
+
+  const device = await getToolDevice(req.params.id);
+  if (!device) return res.status(404).json({ error: 'Device not found' });
+
+  const client = new RouterOSClient(
+    device.ip_address, device.api_port, device.api_username,
+    decrypt(device.api_password_encrypted),
+    15_000,
+    (testSec + 10) * 1000
+  );
+  try {
+    await client.connect();
+    const rows = await client.executeStreaming('/tool/bandwidth-test', {
+      address,
+      direction: ['receive', 'transmit', 'both'].includes(direction) ? direction : 'both',
+      duration: String(testSec),
+      protocol: ['tcp', 'udp'].includes(protocol) ? protocol : 'tcp',
+    }, (testSec + 10) * 1000);
+
+    // Return the final summary row (last row that has tx/rx total averages)
+    const lastRow = rows.filter((r) => r['tx-total-average'] !== undefined || r['rx-total-average'] !== undefined).at(-1);
+    const toMbps = (v: string | undefined) => v ? Math.round(parseInt(v) / 1_000_000) : 0;
+
+    return res.json({
+      tx_mbps: toMbps(lastRow?.['tx-total-average']),
+      rx_mbps: toMbps(lastRow?.['rx-total-average']),
+      direction,
+      protocol,
+      duration: testSec,
+      raw: lastRow ?? rows.at(-1) ?? null,
+    });
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
   } finally {

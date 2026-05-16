@@ -335,6 +335,12 @@ export const deviceToolsApi = {
     api.post<Record<string, string>[]>(`/devices/${id}/tools/ip-scan`, body, { timeout: TOOL_TIMEOUT }),
   wol: (id: number, body: { mac: string; interface: string }) =>
     api.post<{ success: boolean; message: string }>(`/devices/${id}/tools/wol`, body, { timeout: TOOL_TIMEOUT }),
+  capture: (id: number, body: { interface?: string; filter_ip?: string; duration?: number }) =>
+    api.post(`/devices/${id}/tools/capture`, body, { timeout: 120_000, responseType: 'blob' }),
+  btest: (id: number, body: { address: string; direction?: string; duration?: number; protocol?: string }) =>
+    api.post<{ tx_mbps: number; rx_mbps: number; direction: string; protocol: string; duration: number; raw: Record<string, string> | null }>(
+      `/devices/${id}/tools/btest`, body, { timeout: 60_000 }
+    ),
 };
 
 // ─── Events ───────────────────────────────────────────────────────────────────

@@ -32,6 +32,7 @@ export interface DeviceRow {
   name: string;
   ip_address: string;
   api_port: number;
+  ssh_port?: number;
   api_username: string;
   api_password_encrypted: string;
   ssh_username?: string;
