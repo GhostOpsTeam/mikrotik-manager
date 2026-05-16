@@ -1788,11 +1788,14 @@ router.post('/:id/tools/capture', requireWrite, async (req: Request, res: Respon
   }
 
   const fileName = `cap-${Date.now()}`;
-  const remotePath = `/flash/${fileName}.pcap`;
+  // RouterOS SFTP root = device file system root; sniffer writes <file-name>.pcap there
+  const remotePath = `/${fileName}.pcap`;
   const client = makeToolClient(device);
 
   try {
     await client.connect();
+    // Stop any previous capture before reconfiguring
+    await client.execute('/tool/sniffer/stop').catch(() => {});
     const setParams: Record<string, string> = { 'file-name': fileName, 'file-limit': '10240' };
     if (iface) setParams['interface'] = iface;
     if (filter_ip) setParams['filter-ip-address'] = filter_ip;
@@ -1801,21 +1804,30 @@ router.post('/:id/tools/capture', requireWrite, async (req: Request, res: Respon
     await new Promise((r) => setTimeout(r, captureSec * 1000));
     await client.execute('/tool/sniffer/stop').catch(() => {});
     client.disconnect();
+    // Allow RouterOS a moment to flush the PCAP file before SFTP download
+    await new Promise((r) => setTimeout(r, 2000));
 
-    // Download PCAP via SFTP
+    // Download PCAP via SFTP then delete remote file
     const pcapBuffer = await new Promise<Buffer>((resolve, reject) => {
       const ssh = new SshClient();
       ssh.on('ready', () => {
         ssh.sftp((err, sftp) => {
-          if (err) { ssh.end(); return reject(err); }
+          if (err) { ssh.end(); return reject(new Error(`SFTP init failed: ${err.message}`)); }
           const chunks: Buffer[] = [];
           const stream = sftp.createReadStream(remotePath);
           stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-          stream.on('end', () => { ssh.end(); resolve(Buffer.concat(chunks)); });
-          stream.on('error', (e: Error) => { ssh.end(); reject(e); });
+          stream.on('end', () => {
+            // Best-effort delete; don't block the response on it
+            sftp.unlink(remotePath, () => { ssh.end(); });
+            resolve(Buffer.concat(chunks));
+          });
+          stream.on('error', (e: Error) => {
+            ssh.end();
+            reject(new Error(`SFTP read failed (path=${remotePath}): ${e.message}`));
+          });
         });
       });
-      ssh.on('error', reject);
+      ssh.on('error', (e) => reject(new Error(`SSH connect failed: ${e.message}`)));
       ssh.connect({
         host: device.ip_address,
         port: device.ssh_port ?? 22,
@@ -1830,6 +1842,7 @@ router.post('/:id/tools/capture', requireWrite, async (req: Request, res: Respon
     return res.send(pcapBuffer);
   } catch (err) {
     client.disconnect();
+    console.error('[capture]', (err as Error).message);
     return res.status(500).json({ error: (err as Error).message });
   }
 });
