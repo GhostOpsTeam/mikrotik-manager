@@ -1793,19 +1793,24 @@ router.post('/:id/tools/capture', requireWrite, async (req: Request, res: Respon
   const client = makeToolClient(device);
 
   try {
+    console.log(`[capture] connecting to device ${device.id} (${device.ip_address})`);
     await client.connect();
+    console.log(`[capture] connected; configuring sniffer`);
     // Stop any previous capture before reconfiguring
     await client.execute('/tool/sniffer/stop').catch(() => {});
     const setParams: Record<string, string> = { 'file-name': fileName, 'file-limit': '10240' };
     if (iface) setParams['interface'] = iface;
     if (filter_ip) setParams['filter-ip-address'] = filter_ip;
     await client.execute('/tool/sniffer/set', setParams);
+    console.log(`[capture] sniffer configured; starting ${captureSec}s capture`);
     await client.execute('/tool/sniffer/start');
     await new Promise((r) => setTimeout(r, captureSec * 1000));
     await client.execute('/tool/sniffer/stop').catch(() => {});
     client.disconnect();
+    console.log(`[capture] sniffer stopped; waiting for file flush`);
     // Allow RouterOS a moment to flush the PCAP file before SFTP download
     await new Promise((r) => setTimeout(r, 2000));
+    console.log(`[capture] opening SFTP to ${device.ip_address}:${device.ssh_port ?? 22} path=${remotePath}`);
 
     // Download PCAP via SFTP then delete remote file
     const pcapBuffer = await new Promise<Buffer>((resolve, reject) => {

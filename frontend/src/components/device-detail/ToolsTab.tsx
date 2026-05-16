@@ -407,8 +407,20 @@ function PacketCaptureTool({ deviceId, interfaces }: { deviceId: number; interfa
       setFileName(name);
       setReady(true);
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      setError(msg || (e as Error).message || 'Capture failed');
+      // responseType:'blob' means error bodies arrive as Blobs — parse them back to text
+      const blobData = (e as { response?: { data?: unknown } })?.response?.data;
+      if (blobData instanceof Blob) {
+        try {
+          const text = await blobData.text();
+          const json = JSON.parse(text) as { error?: string };
+          setError(json.error || text || 'Capture failed');
+        } catch {
+          setError('Capture failed');
+        }
+      } else {
+        const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+        setError(msg || (e as Error).message || 'Capture failed');
+      }
     } finally {
       setLoading(false);
     }
