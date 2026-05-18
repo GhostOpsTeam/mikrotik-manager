@@ -101,10 +101,12 @@ router.put('/lldp', requireWrite, async (req: Request, res: Response) => {
   });
 });
 
-// GET /api/switches/snmp — SNMP config/status per online switch
+// GET /api/switches/snmp — SNMP config/status for all managed switches
+// Includes offline/unknown devices so the list never disappears during a poll cycle.
+// Unreachable devices fall through to the Promise.allSettled error path and render with an error note.
 router.get('/snmp', async (_req: Request, res: Response) => {
   const switches = await query<DeviceRow>(
-    `SELECT * FROM devices WHERE device_type = 'switch' AND status = 'online'`
+    `SELECT * FROM devices WHERE device_type = 'switch' ORDER BY name`
   );
 
   const results = await Promise.allSettled(

@@ -93,6 +93,7 @@ export default function SwitchesSettingsPage() {
   const { data: snmpStatuses = [], isLoading: snmpLoading, refetch: refetchSnmp, isFetching: snmpFetching } =
     useQuery({
       queryKey: ['switches-snmp'],
+      staleTime: 60_000,
       queryFn: () => switchesApi.getSnmpStatus().then(r => {
         // Pre-populate form from first successful result (if form not yet manually edited)
         const first = r.data.find(s => s.enabled != null && !s.error);
@@ -436,7 +437,9 @@ export default function SwitchesSettingsPage() {
           <div className="flex items-center gap-2 text-sm text-gray-400">
             <RefreshCw className="w-4 h-4 animate-spin" /> Checking SNMP status on all switches…
           </div>
-        ) : snmpStatuses.length > 0 && (
+        ) : snmpStatuses.length === 0 ? (
+          <p className="text-sm text-gray-400 dark:text-slate-500 py-1">No managed switches found.</p>
+        ) : (
           <div className="rounded-lg border border-gray-200 dark:border-slate-700 overflow-hidden">
             <table className="w-full text-sm">
               <thead>
