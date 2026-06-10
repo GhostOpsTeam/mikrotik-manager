@@ -23,6 +23,7 @@ import {
   startBulkAddWorker,
   stopBulkAddWorker,
 } from './services/DeviceBulkAddWorker';
+import { netflowCollector } from './services/netflow/NetflowCollector';
 import { verifyToken } from './middleware/auth';
 import { decrypt } from './utils/crypto';
 import { corsMiddlewareOptions, socketIoCorsOptions } from './utils/corsOrigins';
@@ -47,6 +48,7 @@ import configTemplatesRoutes from './routes/configTemplates';
 import configHistoryRoutes from './routes/configHistory';
 import wirelessRoutes from './routes/wireless';
 import networkServicesRoutes from './routes/networkServices';
+import trafficAnalyticsRoutes from './routes/trafficAnalytics';
 import credentialPresetsRoutes from './routes/credentialPresets';
 import systemRoutes from './routes/system';
 import { auditMiddleware } from './middleware/auditMiddleware';
@@ -214,6 +216,7 @@ app.use('/api/routers', routersRoutes);
 app.use('/api/alerts', alertsRoutes);
 app.use('/api/wireless', wirelessRoutes);
 app.use('/api/network-services', networkServicesRoutes);
+app.use('/api/traffic', trafficAnalyticsRoutes);
 app.use('/api/credential-presets', credentialPresetsRoutes);
 app.use('/api/audit-log', auditLogRoutes);
 app.use('/api/tags', tagsRoutes);
@@ -262,6 +265,9 @@ async function start(): Promise<void> {
   await pollerService.start();
   await startBulkAddWorker();
 
+  // NetFlow/IPFIX collector (binds its UDP socket only when netflow_enabled)
+  await netflowCollector.start();
+
   // Start HTTP server
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`✓ Mikrotik Manager backend running on port ${PORT}`);
@@ -271,6 +277,7 @@ async function start(): Promise<void> {
   const shutdown = async () => {
     console.log('Shutting down...');
     await stopBulkAddWorker();
+    await netflowCollector.stop();
     await pollerService.stop();
     await redis.quit().catch(() => {});
     await pool.end();

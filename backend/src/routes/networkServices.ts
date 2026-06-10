@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { requireAuth, requireWrite } from '../middleware/auth';
 import { DeviceCollector, DeviceRow } from '../services/mikrotik/DeviceCollector';
+import { netflowCollector } from '../services/netflow/NetflowCollector';
 
 const router = Router();
 router.use(requireAuth);
@@ -485,6 +486,168 @@ router.delete('/syslog/rule/:id', requireWrite, async (req: Request, res: Respon
   await withDevice(deviceId, res, async (collector) => {
     await collector.removeSyslogRule(req.params.id);
     res.json({ success: true });
+  });
+});
+
+// ─── NetFlow / Traffic Flow ───────────────────────────────────────────────────
+
+async function getNetflowAppSettings(): Promise<{
+  address: string; port: number; version: string; activeTimeout: string; inactiveTimeout: string;
+}> {
+  const rows = await query<{ key: string; value: unknown }>(
+    `SELECT key, value FROM app_settings
+     WHERE key IN ('netflow_collector_address', 'netflow_collector_port', 'netflow_version',
+                   'netflow_active_timeout', 'netflow_inactive_timeout')`
+  );
+  const map: Record<string, unknown> = {};
+  for (const row of rows) map[row.key] = row.value;
+  return {
+    address: String(map['netflow_collector_address'] || ''),
+    port: Number(map['netflow_collector_port']) || 2055,
+    version: String(map['netflow_version'] || '9'),
+    activeTimeout: String(map['netflow_active_timeout'] || '1m'),
+    inactiveTimeout: String(map['netflow_inactive_timeout'] || '15s'),
+  };
+}
+
+function targetMatchesCollector(
+  targets: Record<string, string>[],
+  collector: { address: string; port: number }
+): boolean {
+  return targets.some(
+    (t) => t['dst-address'] === collector.address && Number(t['port']) === collector.port && t['disabled'] !== 'true'
+  );
+}
+
+// GET /api/network-services/netflow/fleet — traffic-flow state for all online devices
+router.get('/netflow/fleet', async (_req: Request, res: Response) => {
+  const settings = await getNetflowAppSettings();
+  const stats = netflowCollector.getStats();
+  const statsByDevice = new Map(stats.exporters.map((e) => [e.deviceId, e]));
+  const devices = await query<DeviceRow>(`SELECT * FROM devices WHERE status = 'online' ORDER BY name`);
+
+  const results = await Promise.allSettled(
+    devices.map(async (device: DeviceRow) => {
+      const collector = new DeviceCollector(device);
+      try {
+        await collector.connect();
+        const [tfSettings, targets] = await Promise.all([
+          collector.getTrafficFlowSettings(),
+          collector.getTrafficFlowTargets(),
+        ]);
+        const exporterStats = statsByDevice.get(device.id);
+        return {
+          id: device.id,
+          name: device.name,
+          ip_address: device.ip_address,
+          enabled: tfSettings?.['enabled'] === 'true' || tfSettings?.['enabled'] === 'yes',
+          interfaces: tfSettings?.['interfaces'] || '',
+          targets: targets.map((t) => ({
+            id: t['.id'],
+            dst_address: t['dst-address'],
+            port: Number(t['port']) || 0,
+            version: t['version'] || '',
+            disabled: t['disabled'] === 'true',
+          })),
+          target_matches_collector: targetMatchesCollector(targets, settings),
+          flows_received: exporterStats?.flows || 0,
+          last_flow_at: exporterStats?.lastSeen || null,
+        };
+      } catch (err) {
+        return {
+          id: device.id, name: device.name, ip_address: device.ip_address,
+          enabled: null, interfaces: '', targets: [], target_matches_collector: false,
+          flows_received: 0, last_flow_at: null, error: (err as Error).message,
+        };
+      } finally {
+        collector.disconnect();
+      }
+    })
+  );
+
+  res.json({
+    collector: { ...settings, listening: stats.listening },
+    devices: results.map((r) => (r.status === 'fulfilled' ? r.value : { error: (r.reason as Error).message })),
+  });
+});
+
+// GET /api/network-services/netflow?deviceId=X — single device traffic-flow state
+router.get('/netflow', async (req: Request, res: Response) => {
+  const deviceId = deviceIdParam(req, res); if (!deviceId) return;
+  const settings = await getNetflowAppSettings();
+  await withDevice(deviceId, res, async (collector) => {
+    const [tfSettings, targets] = await Promise.all([
+      collector.getTrafficFlowSettings(),
+      collector.getTrafficFlowTargets(),
+    ]);
+    res.json({
+      settings: tfSettings,
+      targets,
+      target_matches_collector: targetMatchesCollector(targets, settings),
+    });
+  });
+});
+
+// PUT /api/network-services/netflow?deviceId=X — body { enabled: boolean }
+// Enable: upsert our export target (matched by dst-address + port) and turn
+// traffic-flow on. Disable: remove our target; only turn traffic-flow off if
+// no other (user-managed) targets remain.
+router.put('/netflow', requireWrite, async (req: Request, res: Response) => {
+  const deviceId = deviceIdParam(req, res); if (!deviceId) return;
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled (boolean) is required' });
+
+  const settings = await getNetflowAppSettings();
+  if (enabled && !settings.address) {
+    return res.status(400).json({ error: 'Set the collector address in NetFlow settings before enabling devices' });
+  }
+
+  await withDevice(deviceId, res, async (collector) => {
+    const targets = await collector.getTrafficFlowTargets();
+    const ours = targets.find(
+      (t) => t['dst-address'] === settings.address && Number(t['port']) === settings.port
+    );
+
+    if (enabled) {
+      const targetParams: Record<string, string> = {
+        'dst-address': settings.address,
+        port: String(settings.port),
+        version: settings.version === 'ipfix' ? 'ipfix' : '9',
+      };
+      if (settings.version !== 'ipfix') {
+        // Re-send templates frequently so the collector can decode data
+        // promptly after a backend restart clears its template cache.
+        targetParams['v9-template-refresh'] = '20';
+        targetParams['v9-template-timeout'] = '1m';
+      }
+      if (ours) {
+        await collector.updateTrafficFlowTarget(ours['.id'], targetParams);
+      } else {
+        await collector.addTrafficFlowTarget(targetParams);
+      }
+      await collector.setTrafficFlowSettings({
+        enabled: 'yes',
+        interfaces: 'all',
+        'active-flow-timeout': settings.activeTimeout,
+        'inactive-flow-timeout': settings.inactiveTimeout,
+      });
+    } else {
+      if (ours) await collector.removeTrafficFlowTarget(ours['.id']);
+      const remaining = (await collector.getTrafficFlowTargets()).filter((t) => t['.id'] !== ours?.['.id']);
+      if (remaining.length === 0) {
+        await collector.setTrafficFlowSettings({ enabled: 'no' });
+      }
+    }
+
+    const [tfSettings, updatedTargets] = await Promise.all([
+      collector.getTrafficFlowSettings(),
+      collector.getTrafficFlowTargets(),
+    ]);
+    res.json({
+      settings: tfSettings,
+      targets: updatedTargets,
+      target_matches_collector: targetMatchesCollector(updatedTargets, settings),
+    });
   });
 });
 

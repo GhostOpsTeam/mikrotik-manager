@@ -179,6 +179,8 @@ export interface Client {
   client_type: 'wired' | 'wireless';
   active: boolean;
   last_seen?: string;
+  /** Today's NetFlow upload+download total (0 when NetFlow is not collecting). */
+  traffic_today_bytes?: number;
 }
 
 export interface Backup {

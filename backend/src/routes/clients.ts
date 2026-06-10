@@ -42,7 +42,10 @@ router.get('/', async (req: Request, res: Response) => {
   // Deduplicate by MAC address across devices: prefer active rows, then most recently seen.
   // The inner DISTINCT ON picks the best row per MAC; the outer query applies final sort + pagination.
   const sql = `
-    SELECT * FROM (
+    SELECT deduped.*,
+           -- float8 so node-pg returns a number (bigint would arrive as a string)
+           (COALESCE(ctd.upload_bytes, 0) + COALESCE(ctd.download_bytes, 0))::float8 AS traffic_today_bytes
+    FROM (
       SELECT DISTINCT ON (c.mac_address)
         c.*, d.name as device_name,
         wi.ssid as ssid
@@ -53,6 +56,8 @@ router.get('/', async (req: Request, res: Response) => {
       ${where}
       ORDER BY c.mac_address, (c.client_type = 'wireless') DESC, c.active DESC, c.last_seen DESC NULLS LAST
     ) deduped
+    LEFT JOIN client_traffic_daily ctd
+      ON ctd.mac_address = LOWER(deduped.mac_address) AND ctd.day = CURRENT_DATE
     ORDER BY last_seen DESC NULLS LAST
     LIMIT $${idx++} OFFSET $${idx++}
   `;

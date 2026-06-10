@@ -1,0 +1,233 @@
+import { Router, Request, Response } from 'express';
+import { getQueryApi, bucket } from '../config/influxdb';
+import { query } from '../config/database';
+import { requireAuth } from '../middleware/auth';
+import { netflowCollector } from '../services/netflow/NetflowCollector';
+
+const router = Router();
+router.use(requireAuth);
+
+function rangeToFlux(range: string): string {
+  const allowed = ['1h', '3h', '6h', '12h', '24h', '7d', '30d'];
+  return allowed.includes(range) ? range : '24h';
+}
+
+// Aggregation window sized to the range so charts stay readable (points are
+// written every 60s by the collector flush).
+function windowForRange(range: string): string {
+  const map: Record<string, string> = {
+    '1h': '1m', '3h': '5m', '6h': '5m', '12h': '10m',
+    '24h': '15m', '7d': '1h', '30d': '6h',
+  };
+  return map[range] || '15m';
+}
+
+// MACs are used inside Flux queries — restrict to safe charsets (real MACs
+// plus the 'unknown'/'other' pseudo-clients).
+function sanitizeMac(raw: string): string | null {
+  const mac = raw.toLowerCase();
+  if (mac === 'unknown' || mac === 'other') return mac;
+  return /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(mac) ? mac : null;
+}
+
+// GET /api/traffic/status — collector state for the config page
+router.get('/status', async (_req: Request, res: Response) => {
+  res.json(netflowCollector.getStats());
+});
+
+// GET /api/traffic/timeseries?range=24h — fleet-wide upload/download over time
+router.get('/timeseries', async (req: Request, res: Response) => {
+  const range = rangeToFlux(String(req.query.range || '24h'));
+  const every = windowForRange(range);
+  const queryApi = getQueryApi();
+
+  const fluxQuery = `
+    from(bucket: "${bucket}")
+      |> range(start: -${range})
+      |> filter(fn: (r) => r._measurement == "client_traffic")
+      |> filter(fn: (r) => r._field == "bytes")
+      |> group(columns: ["direction"])
+      |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
+  `;
+
+  const pivoted: Record<string, { time: string; upload: number; download: number }> = {};
+  try {
+    await queryApi.collectRows(fluxQuery, (row, tableMeta) => {
+      const time = tableMeta.get(row, '_time') as string;
+      const direction = tableMeta.get(row, 'direction') as string;
+      const value = Number(tableMeta.get(row, '_value')) || 0;
+      if (!pivoted[time]) pivoted[time] = { time, upload: 0, download: 0 };
+      if (direction === 'upload') pivoted[time].upload += value;
+      else if (direction === 'download') pivoted[time].download += value;
+    });
+  } catch {
+    // No data yet
+  }
+
+  res.json(Object.values(pivoted).sort((a, b) => a.time.localeCompare(b.time)));
+});
+
+// GET /api/traffic/top-clients?range=24h&limit=10 — top talkers with client names
+router.get('/top-clients', async (req: Request, res: Response) => {
+  const range = rangeToFlux(String(req.query.range || '24h'));
+  const limit = Math.min(parseInt(String(req.query.limit || '10'), 10) || 10, 50);
+  const queryApi = getQueryApi();
+
+  const fluxQuery = `
+    from(bucket: "${bucket}")
+      |> range(start: -${range})
+      |> filter(fn: (r) => r._measurement == "client_traffic")
+      |> filter(fn: (r) => r._field == "bytes")
+      |> group(columns: ["mac", "direction"])
+      |> sum()
+  `;
+
+  const perMac = new Map<string, { upload: number; download: number }>();
+  try {
+    await queryApi.collectRows(fluxQuery, (row, tableMeta) => {
+      const mac = tableMeta.get(row, 'mac') as string;
+      const direction = tableMeta.get(row, 'direction') as string;
+      const value = Number(tableMeta.get(row, '_value')) || 0;
+      let entry = perMac.get(mac);
+      if (!entry) {
+        entry = { upload: 0, download: 0 };
+        perMac.set(mac, entry);
+      }
+      if (direction === 'upload') entry.upload += value;
+      else entry.download += value;
+    });
+  } catch {
+    // No data yet
+  }
+
+  const ranked = Array.from(perMac.entries())
+    .map(([mac, e]) => ({ mac, upload_bytes: e.upload, download_bytes: e.download, total_bytes: e.upload + e.download }))
+    .sort((a, b) => b.total_bytes - a.total_bytes)
+    .slice(0, limit);
+
+  // Enrich real MACs with client identity from Postgres
+  const realMacs = ranked.map((r) => r.mac).filter((m) => m !== 'unknown' && m !== 'other');
+  const names = new Map<string, { hostname: string | null; custom_name: string | null; vendor: string | null; ip_address: string | null }>();
+  if (realMacs.length > 0) {
+    const rows = await query<{ mac_address: string; hostname: string | null; custom_name: string | null; vendor: string | null; ip_address: string | null }>(
+      `SELECT DISTINCT ON (mac_address) mac_address, hostname, custom_name, vendor, ip_address
+       FROM clients WHERE LOWER(mac_address) = ANY($1)
+       ORDER BY mac_address, last_seen DESC NULLS LAST`,
+      [realMacs]
+    );
+    for (const row of rows) names.set(row.mac_address.toLowerCase(), row);
+  }
+
+  res.json(
+    ranked.map((r) => {
+      const info = names.get(r.mac);
+      return {
+        ...r,
+        hostname: info?.hostname || null,
+        custom_name: info?.custom_name || null,
+        vendor: info?.vendor || null,
+        ip_address: info?.ip_address || null,
+      };
+    })
+  );
+});
+
+// GET /api/traffic/apps?range=24h&mac=xx:xx:.. — app-category byte totals
+// (fleet-wide, or for a single client when mac is given)
+router.get('/apps', async (req: Request, res: Response) => {
+  const range = rangeToFlux(String(req.query.range || '24h'));
+  const queryApi = getQueryApi();
+
+  let macFilter = '';
+  if (req.query.mac) {
+    const mac = sanitizeMac(String(req.query.mac));
+    if (!mac) return res.status(400).json({ error: 'Invalid mac' });
+    macFilter = `|> filter(fn: (r) => r.mac == "${mac}")`;
+  }
+
+  const fluxQuery = `
+    from(bucket: "${bucket}")
+      |> range(start: -${range})
+      |> filter(fn: (r) => r._measurement == "client_traffic")
+      |> filter(fn: (r) => r._field == "bytes")
+      ${macFilter}
+      |> group(columns: ["app"])
+      |> sum()
+  `;
+
+  const apps: { app: string; bytes: number }[] = [];
+  try {
+    await queryApi.collectRows(fluxQuery, (row, tableMeta) => {
+      apps.push({
+        app: tableMeta.get(row, 'app') as string,
+        bytes: Number(tableMeta.get(row, '_value')) || 0,
+      });
+    });
+  } catch {
+    // No data yet
+  }
+
+  res.json(apps.sort((a, b) => b.bytes - a.bytes));
+});
+
+// GET /api/traffic/client/:mac?range=24h — per-client time series + app breakdown
+router.get('/client/:mac', async (req: Request, res: Response) => {
+  const mac = sanitizeMac(req.params.mac);
+  if (!mac) return res.status(400).json({ error: 'Invalid mac' });
+  const range = rangeToFlux(String(req.query.range || '24h'));
+  const every = windowForRange(range);
+  const queryApi = getQueryApi();
+
+  const seriesFlux = `
+    from(bucket: "${bucket}")
+      |> range(start: -${range})
+      |> filter(fn: (r) => r._measurement == "client_traffic")
+      |> filter(fn: (r) => r._field == "bytes")
+      |> filter(fn: (r) => r.mac == "${mac}")
+      |> group(columns: ["direction"])
+      |> aggregateWindow(every: ${every}, fn: sum, createEmpty: false)
+  `;
+
+  const pivoted: Record<string, { time: string; upload: number; download: number }> = {};
+  try {
+    await queryApi.collectRows(seriesFlux, (row, tableMeta) => {
+      const time = tableMeta.get(row, '_time') as string;
+      const direction = tableMeta.get(row, 'direction') as string;
+      const value = Number(tableMeta.get(row, '_value')) || 0;
+      if (!pivoted[time]) pivoted[time] = { time, upload: 0, download: 0 };
+      if (direction === 'upload') pivoted[time].upload += value;
+      else if (direction === 'download') pivoted[time].download += value;
+    });
+  } catch {
+    // No data yet
+  }
+
+  const appsFlux = `
+    from(bucket: "${bucket}")
+      |> range(start: -${range})
+      |> filter(fn: (r) => r._measurement == "client_traffic")
+      |> filter(fn: (r) => r._field == "bytes")
+      |> filter(fn: (r) => r.mac == "${mac}")
+      |> group(columns: ["app"])
+      |> sum()
+  `;
+
+  const apps: { app: string; bytes: number }[] = [];
+  try {
+    await queryApi.collectRows(appsFlux, (row, tableMeta) => {
+      apps.push({
+        app: tableMeta.get(row, 'app') as string,
+        bytes: Number(tableMeta.get(row, '_value')) || 0,
+      });
+    });
+  } catch {
+    // No data yet
+  }
+
+  res.json({
+    series: Object.values(pivoted).sort((a, b) => a.time.localeCompare(b.time)),
+    apps: apps.sort((a, b) => b.bytes - a.bytes),
+  });
+});
+
+export default router;

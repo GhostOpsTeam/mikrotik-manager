@@ -11,7 +11,7 @@ import {
   BarChart, Bar, Cell, ReferenceLine,
 } from 'recharts';
 import { format, formatDistanceToNow, parseISO } from 'date-fns';
-import { clientsApi } from '../services/api';
+import { clientsApi, trafficApi } from '../services/api';
 import type { ClientDetail } from '../services/api';
 import type { SignalPoint } from '../services/api';
 import clsx from 'clsx';
@@ -581,6 +581,127 @@ function TrafficCard({ mac }: { mac: string }) {
   );
 }
 
+// ─── App Traffic (NetFlow) ────────────────────────────────────────────────────
+
+const APP_COLORS = [
+  '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4',
+  '#ec4899', '#84cc16', '#f97316', '#6366f1', '#14b8a6', '#a855f7',
+];
+
+function AppTrafficCard({ mac }: { mac: string }) {
+  const [range, setRange] = useState<'1h' | '24h' | '7d' | '30d'>('24h');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['client-app-traffic', mac, range],
+    queryFn: () => trafficApi.client(mac, range).then(r => r.data),
+    refetchInterval: 60_000,
+  });
+
+  const series = data?.series ?? [];
+  const apps = data?.apps ?? [];
+
+  // NetFlow data only exists for clients on networks with export enabled —
+  // hide the card entirely rather than showing a permanently empty chart.
+  if (!isLoading && series.length === 0 && apps.length === 0) return null;
+
+  const ranges = [
+    { value: '1h', label: '1h' },
+    { value: '24h', label: '24h' },
+    { value: '7d', label: '7d' },
+    { value: '30d', label: '30d' },
+  ] as const;
+
+  const chartData = series.map(p => ({
+    time: p.time,
+    Upload: p.upload,
+    Download: p.download,
+    label: format(parseISO(p.time), range === '7d' || range === '30d' ? 'MMM d HH:mm' : 'HH:mm'),
+  }));
+
+  const totalAppBytes = apps.reduce((s, a) => s + a.bytes, 0);
+
+  return (
+    <div className="card p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+          <Activity className="w-4 h-4 text-gray-400" />
+          App Traffic
+          <span className="text-xs font-normal text-gray-400 dark:text-slate-500">(NetFlow)</span>
+        </h2>
+        <div className="flex gap-1">
+          {ranges.map(r => (
+            <button
+              key={r.value}
+              onClick={() => setRange(r.value)}
+              className={clsx(
+                'px-2 py-1 text-xs rounded font-medium transition-colors',
+                range === r.value
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-700'
+              )}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="h-48 bg-gray-100 dark:bg-slate-700/40 rounded animate-pulse" />
+      ) : (
+        <>
+          {chartData.length > 0 && (
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: 'currentColor' }}
+                  className="text-gray-400 dark:text-slate-500"
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tickFormatter={(v) => formatBytes(v)}
+                  tick={{ fontSize: 10, fill: 'currentColor' }}
+                  className="text-gray-400 dark:text-slate-500"
+                  width={60}
+                />
+                <Tooltip
+                  formatter={(value: number) => [formatBytes(value), '']}
+                  contentStyle={{
+                    fontSize: '11px',
+                    backgroundColor: 'var(--tooltip-bg, #1e293b)',
+                    borderColor: 'var(--tooltip-border, #334155)',
+                    color: 'var(--tooltip-color, #e2e8f0)',
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: '11px' }} />
+                <Area type="monotone" dataKey="Download" stroke="#3b82f6" fill="#3b82f620" strokeWidth={1.5} dot={false} />
+                <Area type="monotone" dataKey="Upload" stroke="#8b5cf6" fill="#8b5cf620" strokeWidth={1.5} dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+
+          {apps.length > 0 && (
+            <div className="space-y-1.5">
+              {apps.slice(0, 8).map((a, i) => (
+                <div key={a.app} className="flex items-center gap-2 text-xs">
+                  <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: APP_COLORS[i % APP_COLORS.length] }} />
+                  <span className="text-gray-700 dark:text-slate-300 flex-1 truncate">{a.app}</span>
+                  <span className="text-gray-400 dark:text-slate-500">
+                    {totalAppBytes > 0 ? `${((a.bytes / totalAppBytes) * 100).toFixed(1)}%` : ''}
+                  </span>
+                  <span className="font-medium text-gray-900 dark:text-white w-16 text-right">{formatBytes(a.bytes)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Signal Strength Graph ────────────────────────────────────────────────────
 
 function qualityColor(dbm: number): string {
@@ -800,12 +921,15 @@ export default function ClientDetailPage() {
       {/* Details on left; Traffic + Signal stacked on right */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <ClientDetailsCard client={client} canWrite={canWrite} />
-        {client.client_type === 'wireless' && (
-          <div className="space-y-4">
-            <TrafficCard mac={mac!} />
-            <SignalCard mac={mac!} />
-          </div>
-        )}
+        <div className="space-y-4">
+          <AppTrafficCard mac={client.mac_address} />
+          {client.client_type === 'wireless' && (
+            <>
+              <TrafficCard mac={mac!} />
+              <SignalCard mac={mac!} />
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

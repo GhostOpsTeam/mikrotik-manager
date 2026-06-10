@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   LayoutDashboard, Router, Users, Bell, GitBranch, HardDrive,
   Settings, Network, ChevronLeft, ChevronRight, Layers, ChevronDown, SlidersHorizontal, X, Wifi,
-  Server, Globe, Clock, Shield, FileText,
+  Server, Globe, Clock, Shield, FileText, Activity, BarChart3,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { APP_VERSION } from '../../version';
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/devices',   icon: Router,          label: 'Devices' },
   { to: '/clients',   icon: Users,           label: 'Clients' },
+  { to: '/traffic',   icon: Activity,        label: 'Traffic' },
   { to: '/events',    icon: Bell,            label: 'Events' },
   { to: '/topology',  icon: GitBranch,       label: 'Topology' },
   { to: '/backups',   icon: HardDrive,       label: 'Backups' },
@@ -42,6 +43,7 @@ const networkServicesSubItems = [
   { to: '/network-services/ntp',        icon: Clock,    label: 'NTP' },
   { to: '/network-services/wireguard',  icon: Shield,   label: 'WireGuard' },
   { to: '/network-services/syslog',     icon: FileText, label: 'Syslog' },
+  { to: '/network-services/netflow',    icon: BarChart3, label: 'NetFlow' },
 ];
 
 interface SidebarProps {

@@ -2,7 +2,7 @@
 
 A self-hosted, full-stack network management platform for MikroTik devices. Monitor, configure, and manage your entire MikroTik infrastructure — routers, switches, and wireless access points — from a single web interface.
 
-![Version](https://img.shields.io/badge/version-0.12.3_Beta-blue)
+![Version](https://img.shields.io/badge/version-0.13.0_Beta-blue)
 ![License](https://img.shields.io/badge/license-AGPLv3-blue)
 ![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.3-3178C6?logo=typescript&logoColor=white)
@@ -144,6 +144,17 @@ Each service supports multi-device management with conflict detection:
 | **NTP** | Server (broadcast/manycast), client (unicast/multicast), sync status |
 | **WireGuard** | Interface management, peer configuration, public key display, RX/TX stats |
 | **Syslog** | Logging actions (remote/memory/disk/echo) and routing rules; single-device or push-to-all with per-entry coverage; enable/disable rules |
+| **NetFlow** | One-toggle Traffic Flow (NetFlow v9/IPFIX) export per device, pointed at the built-in collector; live export status per device |
+
+### Traffic Analytics (NetFlow)
+- **Built-in NetFlow/IPFIX collector** — receives Traffic Flow exports from your routers on UDP 2055 (no external tools needed); decoder supports both NetFlow v9 and IPFIX
+- **Per-client usage accounting** — flows are attributed to known clients (IP → MAC) so every client shows real upload/download totals; "Data (today)" column on the Clients page and an App Traffic card on each client's detail page
+- **Application breakdown** — flows are classified by protocol and port into readable categories (HTTPS, QUIC, DNS, SSH, Email, WireGuard, …) with fleet-wide and per-client views
+- **Top talkers** — ranked client bandwidth usage over 1h/24h/7d/30d ranges on the dedicated Traffic page
+- **Automatic deduplication** — a flow crossing two managed routers is exported twice; the collector keeps only the best exporter per client each window so totals are never double-counted
+- **NAT-tolerant ingest** — when routers export from behind NAT or a VPN/Tailscale subnet router, packets arrive from an address that matches no managed device; the collector accepts these as per-source "unidentified" exporters (configurable) so flows are still attributed to clients instead of silently dropped, and the NetFlow page shows a banner naming the NAT'd source. Per-device export status/flow counters require un-NAT'd sources — exempt `udp/2055` from masquerade on the gateway to restore device identity (and exact cross-device dedup)
+- **Fully UI-configurable** — enable the collector, set its address/port/version in the NetFlow page, then toggle export per device; the platform pushes `/ip traffic-flow` configuration to each router via the RouterOS API
+- Configurable retention for detailed time-series (default 30 days) and daily rollups (default 365 days)
 
 ### Network Topology
 - **LLDP-authoritative** — LLDP links are treated as ground truth; CDP/MNDP links to the same neighbor are automatically suppressed, eliminating spurious "Shared Segment" nodes

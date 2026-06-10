@@ -667,6 +667,8 @@ export default function SettingsPage() {
               {[
                 { key: 'retention_events_days', label: 'Events retention', desc: 'Auto-delete event log entries older than this many days' },
                 { key: 'retention_clients_days', label: 'Client retention', desc: 'Auto-delete inactive client records not seen within this many days' },
+                { key: 'netflow_retention_days', label: 'Traffic detail retention', desc: 'Auto-delete per-client NetFlow time-series data older than this many days' },
+                { key: 'netflow_daily_retention_days', label: 'Traffic daily rollup retention', desc: 'Auto-delete per-client daily traffic totals older than this many days' },
               ].map(({ key, label, desc }) => (
                 <div key={key} className="flex items-center justify-between gap-4">
                   <div>

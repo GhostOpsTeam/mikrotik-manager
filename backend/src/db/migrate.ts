@@ -388,6 +388,19 @@ CREATE TABLE IF NOT EXISTS config_templates (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false;
 
+-- Per-client daily traffic rollups from the NetFlow collector. mac_address
+-- also holds the pseudo-clients 'unknown' (unmapped local IPs) and 'other'
+-- (clients folded by the top-N cardinality cap).
+CREATE TABLE IF NOT EXISTS client_traffic_daily (
+  mac_address    VARCHAR(17) NOT NULL,
+  day            DATE        NOT NULL,
+  upload_bytes   BIGINT      NOT NULL DEFAULT 0,
+  download_bytes BIGINT      NOT NULL DEFAULT 0,
+  app_breakdown  JSONB       NOT NULL DEFAULT '{}',
+  PRIMARY KEY (mac_address, day)
+);
+CREATE INDEX IF NOT EXISTS idx_client_traffic_daily_day ON client_traffic_daily(day DESC);
+
 -- Wireless security profiles (WPA/WPA2/WPA3 config)
 CREATE TABLE IF NOT EXISTS wireless_security_profiles (
   id                    SERIAL PRIMARY KEY,
@@ -424,6 +437,16 @@ const DEFAULT_SETTINGS = [
   { key: 'config_snapshot_enabled', value: true },
   { key: 'config_snapshot_interval_min', value: 60 },
   { key: 'config_snapshot_retention', value: 30 },
+  { key: 'netflow_enabled', value: false },
+  { key: 'netflow_collector_address', value: '' },
+  { key: 'netflow_collector_port', value: 2055 },
+  { key: 'netflow_version', value: '9' },
+  { key: 'netflow_active_timeout', value: '1m' },
+  { key: 'netflow_inactive_timeout', value: '15s' },
+  { key: 'netflow_topn_clients', value: 50 },
+  { key: 'netflow_accept_unknown', value: true },
+  { key: 'netflow_retention_days', value: 30 },
+  { key: 'netflow_daily_retention_days', value: 365 },
 ];
 
 export async function runMigrations(): Promise<void> {

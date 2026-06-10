@@ -2706,4 +2706,31 @@ export class DeviceCollector {
   async removeWireGuardPeer(id: string): Promise<void> {
     await this.client.execute('/interface/wireguard/peers/remove', { '.id': id });
   }
+
+  // Traffic Flow (NetFlow/IPFIX export) ─────────────────────────────────────────
+
+  async getTrafficFlowSettings(): Promise<Record<string, string> | null> {
+    const rows = await this.client.execute('/ip/traffic-flow/print', {}).catch(() => [] as Record<string, string>[]);
+    return rows[0] || null;
+  }
+
+  async setTrafficFlowSettings(params: Record<string, string>): Promise<void> {
+    await this.client.execute('/ip/traffic-flow/set', params);
+  }
+
+  async getTrafficFlowTargets(): Promise<Record<string, string>[]> {
+    return this.client.execute('/ip/traffic-flow/target/print', { detail: '' }).catch(() => [] as Record<string, string>[]);
+  }
+
+  async addTrafficFlowTarget(params: Record<string, string>): Promise<void> {
+    await this.client.execute('/ip/traffic-flow/target/add', params);
+  }
+
+  async updateTrafficFlowTarget(id: string, params: Record<string, string>): Promise<void> {
+    await this.client.execute('/ip/traffic-flow/target/set', { '.id': id, ...params });
+  }
+
+  async removeTrafficFlowTarget(id: string): Promise<void> {
+    await this.client.execute('/ip/traffic-flow/target/remove', { '.id': id });
+  }
 }

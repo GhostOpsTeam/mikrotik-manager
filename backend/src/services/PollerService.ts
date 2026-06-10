@@ -207,6 +207,17 @@ export class PollerService {
         );
       }
 
+      // NetFlow data retention — runs once per day. Purges old client_traffic
+      // points from InfluxDB and old daily rollups from Postgres.
+      const netflowPruneKey = 'task:netflow_retention';
+      const lastNetflowPrune = await this.getTimestamp(netflowPruneKey);
+      if (now - lastNetflowPrune > 86_400_000) {
+        await this.setTimestamp(netflowPruneKey, now, 86_400 + 3_600);
+        this.purgeNetflowData().catch((e) =>
+          console.error('[Poller] NetFlow retention error:', e)
+        );
+      }
+
       // Stale client pruning — runs once per hour
       // Deletes inactive client records not seen for longer than retention_clients_days.
       const pruneKey = 'task:prune_clients';
@@ -350,6 +361,48 @@ export class PollerService {
     if (updated > 0) {
       console.log(`[Poller] Reverse DNS enriched ${updated} client hostname(s)`);
       this.io?.emit('clients:updated', {});
+    }
+  }
+
+  private async purgeNetflowData(): Promise<void> {
+    const rows = await query<{ key: string; value: unknown }>(
+      `SELECT key, value FROM app_settings
+       WHERE key IN ('netflow_retention_days', 'netflow_daily_retention_days')`
+    );
+    const map: Record<string, unknown> = {};
+    for (const row of rows) map[row.key] = row.value;
+    const detailDays = Number(map['netflow_retention_days']) || 30;
+    const dailyDays = Number(map['netflow_daily_retention_days']) || 365;
+
+    // InfluxDB: delete client_traffic points older than the detail retention
+    const { DeleteAPI } = await import('@influxdata/influxdb-client-apis');
+    const { getInfluxClient, org, bucket } = await import('../config/influxdb');
+    const stop = new Date(Date.now() - detailDays * 86_400_000).toISOString();
+    await new DeleteAPI(getInfluxClient())
+      .postDelete({
+        org,
+        bucket,
+        body: {
+          start: '1970-01-01T00:00:00Z',
+          stop,
+          predicate: '_measurement="client_traffic"',
+        },
+      })
+      .catch((e) => console.error('[Poller] NetFlow Influx purge error:', (e as Error).message));
+
+    // Postgres: delete daily rollups older than the rollup retention
+    const result = await query<{ count: string }>(
+      `WITH deleted AS (
+         DELETE FROM client_traffic_daily
+         WHERE day < CURRENT_DATE - ($1 || ' days')::interval
+         RETURNING 1
+       )
+       SELECT COUNT(*) AS count FROM deleted`,
+      [dailyDays]
+    );
+    const count = parseInt(result[0]?.count || '0', 10);
+    if (count > 0) {
+      console.log(`[Poller] NetFlow retention pruned ${count} daily rollup row(s) (> ${dailyDays} days)`);
     }
   }
 

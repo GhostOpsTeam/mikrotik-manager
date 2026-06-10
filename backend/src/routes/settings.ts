@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, queryOne } from '../config/database';
 import { requireAuth, requireAdmin } from '../middleware/auth';
+import { netflowCollector } from '../services/netflow/NetflowCollector';
 
 const router = Router();
 router.use(requireAuth);
@@ -25,6 +26,11 @@ router.put('/', requireAdmin, async (req: Request, res: Response) => {
        ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
       [key, JSON.stringify(value)]
     );
+  }
+  // Apply NetFlow listener changes immediately instead of waiting for the
+  // collector's periodic settings reconcile.
+  if (Object.keys(updates).some((k) => k.startsWith('netflow_'))) {
+    netflowCollector.reconcile().catch(() => {});
   }
   res.json({ message: 'Settings updated' });
 });

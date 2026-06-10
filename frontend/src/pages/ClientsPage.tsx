@@ -19,6 +19,13 @@ const REFRESH_OPTIONS = [
 
 const STORAGE_KEY = 'clients-refresh-interval';
 
+function formatDataBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
 function readStoredInterval(): number | null {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw === 'null') return null;
@@ -189,6 +196,7 @@ export default function ClientsPage() {
         case 'interface_name': av = a.interface_name || ''; bv = b.interface_name || ''; break;
         case 'vlan_id':        av = a.vlan_id ?? -1; bv = b.vlan_id ?? -1; break;
         case 'device_name':    av = a.device_name || ''; bv = b.device_name || ''; break;
+        case 'traffic_today_bytes': av = a.traffic_today_bytes ?? 0; bv = b.traffic_today_bytes ?? 0; break;
         case 'last_seen':      av = a.last_seen || ''; bv = b.last_seen || ''; break;
         default:               av = ''; bv = '';
       }
@@ -298,6 +306,7 @@ export default function ClientsPage() {
                     { col: 'interface_name', label: 'Port',                align: 'left'  },
                     { col: 'vlan_id',        label: 'VLAN',                align: 'left'  },
                     { col: 'device_name',    label: 'Device',              align: 'left'  },
+                    { col: 'traffic_today_bytes', label: 'Data (today)',   align: 'left'  },
                     { col: 'last_seen',      label: 'Last Seen',           align: 'left'  },
                   ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => (
                     <th
@@ -391,6 +400,9 @@ export default function ClientsPage() {
                     </td>
                     <td className="px-4 py-2.5 text-xs text-gray-500 dark:text-slate-400">
                       {client.device_name || '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-gray-500 dark:text-slate-400 whitespace-nowrap">
+                      {client.traffic_today_bytes ? formatDataBytes(client.traffic_today_bytes) : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-slate-500">
                       {client.last_seen

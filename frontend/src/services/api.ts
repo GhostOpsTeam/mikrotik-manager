@@ -775,6 +775,73 @@ export const networkServicesApi = {
     api.put<NS[]>(`/network-services/wireguard/peer/${encodeURIComponent(id)}`, body, { params: { deviceId } }),
   deleteWireGuardPeer: (deviceId: number, id: string) =>
     api.delete(`/network-services/wireguard/peer/${encodeURIComponent(id)}`, { params: { deviceId } }),
+
+  // ── NetFlow ───────────────────────────────────────────────────────────────
+  netflowFleet: () =>
+    api.get<{
+      collector: { address: string; port: number; version: string; listening: boolean };
+      devices: NetflowDeviceState[];
+    }>('/network-services/netflow/fleet', { timeout: 60_000 }),
+  getNetflow: (deviceId: number) =>
+    api.get<{ settings: NS | null; targets: NS[]; target_matches_collector: boolean }>(
+      '/network-services/netflow', { params: { deviceId } }
+    ),
+  setNetflow: (deviceId: number, enabled: boolean) =>
+    api.put<{ settings: NS | null; targets: NS[]; target_matches_collector: boolean }>(
+      '/network-services/netflow', { enabled }, { params: { deviceId } }
+    ),
+};
+
+export interface NetflowDeviceState {
+  id: number;
+  name: string;
+  ip_address: string;
+  enabled: boolean | null;
+  interfaces: string;
+  targets: { id: string; dst_address: string; port: number; version: string; disabled: boolean }[];
+  target_matches_collector: boolean;
+  flows_received: number;
+  last_flow_at: string | null;
+  error?: string;
+}
+
+// ─── Traffic Analytics (NetFlow) ──────────────────────────────────────────────
+
+export interface ClientTrafficPoint { time: string; upload: number; download: number }
+export interface TrafficTopClient {
+  mac: string;
+  upload_bytes: number;
+  download_bytes: number;
+  total_bytes: number;
+  hostname: string | null;
+  custom_name: string | null;
+  vendor: string | null;
+  ip_address: string | null;
+}
+export interface TrafficApp { app: string; bytes: number }
+export interface TrafficCollectorStats {
+  listening: boolean;
+  port: number;
+  packetsReceived: number;
+  flowsDecoded: number;
+  flowsAttributed: number;
+  packetsFromUnknownExporter: number;
+  recordsWithoutTemplate: number;
+  exporters: { deviceId: number; deviceName: string; packets: number; flows: number; lastSeen: string | null }[];
+}
+
+export const trafficApi = {
+  status: () => api.get<TrafficCollectorStats>('/traffic/status'),
+  timeseries: (range = '24h') =>
+    api.get<ClientTrafficPoint[]>('/traffic/timeseries', { params: { range } }),
+  topClients: (range = '24h', limit = 10) =>
+    api.get<TrafficTopClient[]>('/traffic/top-clients', { params: { range, limit } }),
+  apps: (range = '24h', mac?: string) =>
+    api.get<TrafficApp[]>('/traffic/apps', { params: { range, mac } }),
+  client: (mac: string, range = '24h') =>
+    api.get<{ series: ClientTrafficPoint[]; apps: TrafficApp[] }>(
+      `/traffic/client/${encodeURIComponent(mac)}`, { params: { range } }
+    ),
 };
 
 // ─── Maintenance Windows ──────────────────────────────────────────────────────
