@@ -2,7 +2,7 @@
 
 A self-hosted, full-stack network management platform for MikroTik devices. Monitor, configure, and manage your entire MikroTik infrastructure — routers, switches, and wireless access points — from a single web interface.
 
-![Version](https://img.shields.io/badge/version-0.13.3_Beta-blue)
+![Version](https://img.shields.io/badge/version-0.14.0_Beta-blue)
 ![License](https://img.shields.io/badge/license-AGPLv3-blue)
 ![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.3-3178C6?logo=typescript&logoColor=white)
@@ -115,8 +115,20 @@ A self-hosted, full-stack network management platform for MikroTik devices. Moni
 ### Routers
 - Routing table viewer
 - Interface overview with IP assignments
-- Firewall rule inspection
 - Router-specific settings and configuration
+
+### Firewall & Security
+A Meraki/UniFi-grade firewall experience built on the full RouterOS feature set:
+- **Dedicated Security Center** — a top-level section with fleet-wide hardening scores, a per-device posture list, and a "Common Findings" rollup that aggregates identical issues across every device; "Manage" deep-links into a device's Security tab. Firewall/NAT, bandwidth, and connections are available on every managed RouterOS device (routers, switches, and APs)
+- **Friendly rule builder** — Allow/Drop/Reject action chips, Any/Address/Address-List source & destination pickers, well-known port presets (HTTPS/HTTP/SSH/DNS/RDP/SMB), connection-state chips, per-rule logging, and a live plain-English preview of every rule
+- **Address lists as reusable objects** — define `LAN`, `Trusted`, `Blocklist` etc. once and reference them from any rule (the Meraki/UniFi "groups" concept)
+- **Rule reordering** — move rules up/down (order is decisive in RouterOS) with a single click
+- **Hit counters & dead-rule insight** — per-rule packet/byte counters surface which rules are matching and flag zero-hit rules; one-click counter reset
+- **NAT wizards** — guided Port Forward, Masquerade (internet sharing), and 1:1 NAT flows instead of raw fields, plus a Custom mode
+- **Safe-apply lockout guard** — refuses to apply an unscoped `input`-chain drop/reject that would lock the platform/admin out of the device, requiring explicit confirmation
+- **Security posture audit** — per-device hardening checklist (insecure services like telnet/ftp/www/api, missing input-chain firewall, SNMP exposure) with a score and one-click remediation, plus a management-services table
+- **Bandwidth control** — simple-queue management with up/down caps per IP, subnet, or interface, and a one-click "Limit this client" action on the client detail page
+- **Active connections viewer** — live connection-tracking table (source/destination, protocol, state, rate, bytes) with search
 
 ### Switches
 - VLAN management (create, edit, delete VLANs)

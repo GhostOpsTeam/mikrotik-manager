@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, RefreshCw, Activity, Cpu, MemoryStick, Clock, ExternalLink, TerminalSquare, ShieldCheck,
@@ -17,9 +17,12 @@ import ConfigHistoryTab from '../components/device-detail/ConfigHistoryTab';
 import HardwareTab from '../components/device-detail/HardwareTab';
 import ToolsTab from '../components/device-detail/ToolsTab';
 import RadiosTab from '../components/device-detail/RadiosTab';
+import ConnectionsTab from '../components/device-detail/ConnectionsTab';
+import QueuesTab from '../components/device-detail/QueuesTab';
+import SecurityTab from '../components/device-detail/SecurityTab';
 import clsx from 'clsx';
 
-type TabKey = 'overview' | 'ports' | 'vlans' | 'routing' | 'firewall' | 'config' | 'config-history' | 'hardware' | 'tools' | 'radios';
+type TabKey = 'overview' | 'ports' | 'vlans' | 'routing' | 'firewall' | 'security' | 'queues' | 'connections' | 'config' | 'config-history' | 'hardware' | 'tools' | 'radios';
 
 function formatUptime(raw: string): string {
   if (!raw) return '—';
@@ -46,7 +49,10 @@ export default function DeviceDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const canWrite = useCanWrite();
-  const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [searchParams] = useSearchParams();
+  const VALID_TABS: TabKey[] = ['overview', 'ports', 'vlans', 'routing', 'firewall', 'security', 'queues', 'connections', 'config', 'config-history', 'hardware', 'tools', 'radios'];
+  const requestedTab = searchParams.get('tab') as TabKey | null;
+  const [activeTab, setActiveTab] = useState<TabKey>(requestedTab && VALID_TABS.includes(requestedTab) ? requestedTab : 'overview');
   const [autoOpenBridge, setAutoOpenBridge] = useState<string | null>(null);
   const [showTerminal, setShowTerminal] = useState(false);
 
@@ -106,6 +112,11 @@ export default function DeviceDetailPage() {
     { key: 'vlans', label: 'VLANs' },
     { key: 'routing', label: 'Routing' },
     { key: 'firewall', label: 'Firewall' },
+    { key: 'security', label: 'Security' },
+    // RouterOS L3 features are available on every managed device, so show them
+    // for all device types (the tabs render a clean empty state when unused).
+    { key: 'queues', label: 'Bandwidth' },
+    { key: 'connections', label: 'Connections' },
     { key: 'config', label: 'Config' },
     { key: 'config-history', label: 'Config History' },
     { key: 'hardware', label: 'Hardware' },
@@ -370,7 +381,10 @@ export default function DeviceDetailPage() {
         />
       )}
       {activeTab === 'routing' && <RoutingTab deviceId={deviceId} />}
-      {activeTab === 'firewall' && <FirewallTab deviceId={deviceId} deviceType={device?.device_type} />}
+      {activeTab === 'firewall' && <FirewallTab deviceId={deviceId} />}
+      {activeTab === 'security' && <SecurityTab deviceId={deviceId} />}
+      {activeTab === 'queues' && <QueuesTab deviceId={deviceId} />}
+      {activeTab === 'connections' && <ConnectionsTab deviceId={deviceId} />}
       {activeTab === 'config' && <SystemConfigTab deviceId={deviceId} device={device} />}
       {activeTab === 'config-history' && <ConfigHistoryTab deviceId={deviceId} />}
       {activeTab === 'hardware' && <HardwareTab deviceId={deviceId} />}

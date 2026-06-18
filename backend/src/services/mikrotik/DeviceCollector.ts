@@ -1747,8 +1747,10 @@ export class DeviceCollector {
     return this.client.execute('/ip/route/print', { detail: '' });
   }
 
+  // `stats` makes RouterOS include the per-rule bytes/packets hit counters so
+  // the UI can show which rules are matching (and flag dead, zero-hit rules).
   async getFirewallRules(): Promise<Record<string, string>[]> {
-    return this.client.execute('/ip/firewall/filter/print', { detail: '' });
+    return this.client.execute('/ip/firewall/filter/print', { detail: '', stats: '' });
   }
 
   async addFirewallRule(params: Record<string, string>): Promise<void> {
@@ -1763,8 +1765,21 @@ export class DeviceCollector {
     await this.client.execute('/ip/firewall/filter/remove', { '.id': id });
   }
 
+  // Reorder: RouterOS evaluates rules top-to-bottom, so order is decisive.
+  // `destination` is the .id the rule should be placed *before* (RouterOS
+  // semantics), or omitted to move to the end.
+  async moveFirewallRule(id: string, destination?: string): Promise<void> {
+    const params: Record<string, string> = { numbers: id };
+    if (destination) params.destination = destination;
+    await this.client.execute('/ip/firewall/filter/move', params);
+  }
+
+  async resetFirewallCounters(): Promise<void> {
+    await this.client.execute('/ip/firewall/filter/reset-counters-all', {});
+  }
+
   async getNatRules(): Promise<Record<string, string>[]> {
-    return this.client.execute('/ip/firewall/nat/print', { detail: '' });
+    return this.client.execute('/ip/firewall/nat/print', { detail: '', stats: '' });
   }
 
   async addNatRule(params: Record<string, string>): Promise<void> {
@@ -1777,6 +1792,64 @@ export class DeviceCollector {
 
   async deleteNatRule(id: string): Promise<void> {
     await this.client.execute('/ip/firewall/nat/remove', { '.id': id });
+  }
+
+  async moveNatRule(id: string, destination?: string): Promise<void> {
+    const params: Record<string, string> = { numbers: id };
+    if (destination) params.destination = destination;
+    await this.client.execute('/ip/firewall/nat/move', params);
+  }
+
+  // ─── Firewall Address Lists (reusable address objects) ──────────────────────
+
+  async getAddressLists(): Promise<Record<string, string>[]> {
+    return this.client.execute('/ip/firewall/address-list/print', { detail: '' }).catch(() => [] as Record<string, string>[]);
+  }
+
+  async addAddressListEntry(params: Record<string, string>): Promise<void> {
+    await this.client.execute('/ip/firewall/address-list/add', params);
+  }
+
+  async updateAddressListEntry(id: string, params: Record<string, string>): Promise<void> {
+    await this.client.execute('/ip/firewall/address-list/set', { '.id': id, ...params });
+  }
+
+  async removeAddressListEntry(id: string): Promise<void> {
+    await this.client.execute('/ip/firewall/address-list/remove', { '.id': id });
+  }
+
+  // ─── Connection tracking (live active connections) ──────────────────────────
+
+  async getConnections(): Promise<Record<string, string>[]> {
+    return this.client.execute('/ip/firewall/connection/print', { detail: '' }).catch(() => [] as Record<string, string>[]);
+  }
+
+  // ─── Simple Queues (per-client / per-subnet bandwidth control) ──────────────
+
+  async getSimpleQueues(): Promise<Record<string, string>[]> {
+    return this.client.execute('/queue/simple/print', { detail: '', stats: '' }).catch(() => [] as Record<string, string>[]);
+  }
+
+  async addSimpleQueue(params: Record<string, string>): Promise<void> {
+    await this.client.execute('/queue/simple/add', params);
+  }
+
+  async updateSimpleQueue(id: string, params: Record<string, string>): Promise<void> {
+    await this.client.execute('/queue/simple/set', { '.id': id, ...params });
+  }
+
+  async removeSimpleQueue(id: string): Promise<void> {
+    await this.client.execute('/queue/simple/remove', { '.id': id });
+  }
+
+  // ─── IP Services (for security-posture audit + hardening) ───────────────────
+
+  async getServices(): Promise<Record<string, string>[]> {
+    return this.client.execute('/ip/service/print', { detail: '' }).catch(() => [] as Record<string, string>[]);
+  }
+
+  async setServiceDisabled(id: string, disabled: boolean): Promise<void> {
+    await this.client.execute('/ip/service/set', { '.id': id, disabled: disabled ? 'yes' : 'no' });
   }
 
   // ─── Bridge ────────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import type { CredentialPresetRow } from './credentialPresets';
 import { createDeviceFromBody, type CreateDeviceInput, type CreateDeviceContext } from '../services/deviceCreation';
 import { parsePort } from '../utils/parsePort';
 import { safeConnectionError } from '../utils/safeClientError';
+import { detectLockoutRisk } from '../utils/firewallSafety';
 import { redis } from '../config/redis';
 import { enqueueBulkAddJob, getBulkAddJobState } from '../services/DeviceBulkAddWorker';
 
@@ -649,14 +650,20 @@ function bodyToRosParams(body: Record<string, unknown>): Record<string, string> 
 
 // POST /api/devices/:id/firewall
 router.post('/:id/firewall', requireWrite, async (req: Request, res: Response) => {
-  const { chain, action } = req.body;
+  const { chain, action, force } = req.body;
   if (!chain || !action) return res.status(400).json({ error: 'chain and action are required' });
+  const params = bodyToRosParams(req.body);
+  // Safe-apply: refuse a self-lockout rule unless the operator confirms (force).
+  if (!force) {
+    const lock = detectLockoutRisk(params);
+    if (lock.risky) return res.status(409).json({ lockout: true, reason: lock.reason });
+  }
   const deviceRow = await queryOne<DeviceRow>(`SELECT * FROM devices WHERE id = $1`, [req.params.id]);
   if (!deviceRow) return res.status(404).json({ error: 'Device not found' });
   const collector = new DeviceCollector(deviceRow);
   try {
     await collector.connect();
-    await collector.addFirewallRule(bodyToRosParams(req.body));
+    await collector.addFirewallRule(params);
     return res.status(201).json(await collector.getFirewallRules());
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
@@ -667,12 +674,51 @@ router.post('/:id/firewall', requireWrite, async (req: Request, res: Response) =
 
 // PUT /api/devices/:id/firewall/:ruleId
 router.put('/:id/firewall/:ruleId', requireWrite, async (req: Request, res: Response) => {
+  const params = bodyToRosParams(req.body);
+  if (!req.body.force) {
+    const lock = detectLockoutRisk(params);
+    if (lock.risky) return res.status(409).json({ lockout: true, reason: lock.reason });
+  }
   const deviceRow = await queryOne<DeviceRow>(`SELECT * FROM devices WHERE id = $1`, [req.params.id]);
   if (!deviceRow) return res.status(404).json({ error: 'Device not found' });
   const collector = new DeviceCollector(deviceRow);
   try {
     await collector.connect();
-    await collector.updateFirewallRule(req.params.ruleId, bodyToRosParams(req.body));
+    await collector.updateFirewallRule(req.params.ruleId, params);
+    return res.json(await collector.getFirewallRules());
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  } finally {
+    collector.disconnect();
+  }
+});
+
+// POST /api/devices/:id/firewall/move  { id, destination? }
+router.post('/:id/firewall/move', requireWrite, async (req: Request, res: Response) => {
+  const { id, destination } = req.body;
+  if (!id) return res.status(400).json({ error: 'id is required' });
+  const deviceRow = await queryOne<DeviceRow>(`SELECT * FROM devices WHERE id = $1`, [req.params.id]);
+  if (!deviceRow) return res.status(404).json({ error: 'Device not found' });
+  const collector = new DeviceCollector(deviceRow);
+  try {
+    await collector.connect();
+    await collector.moveFirewallRule(String(id), destination ? String(destination) : undefined);
+    return res.json(await collector.getFirewallRules());
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  } finally {
+    collector.disconnect();
+  }
+});
+
+// POST /api/devices/:id/firewall/reset-counters
+router.post('/:id/firewall/reset-counters', requireWrite, async (req: Request, res: Response) => {
+  const deviceRow = await queryOne<DeviceRow>(`SELECT * FROM devices WHERE id = $1`, [req.params.id]);
+  if (!deviceRow) return res.status(404).json({ error: 'Device not found' });
+  const collector = new DeviceCollector(deviceRow);
+  try {
+    await collector.connect();
+    await collector.resetFirewallCounters();
     return res.json(await collector.getFirewallRules());
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
@@ -781,6 +827,206 @@ router.delete('/:id/nat/:ruleId', requireWrite, async (req: Request, res: Respon
   } finally {
     collector.disconnect();
   }
+});
+
+// POST /api/devices/:id/nat/move  { id, destination? }
+router.post('/:id/nat/move', requireWrite, async (req: Request, res: Response) => {
+  const { id, destination } = req.body;
+  if (!id) return res.status(400).json({ error: 'id is required' });
+  const deviceRow = await queryOne<DeviceRow>(`SELECT * FROM devices WHERE id = $1`, [req.params.id]);
+  if (!deviceRow) return res.status(404).json({ error: 'Device not found' });
+  const collector = new DeviceCollector(deviceRow);
+  try {
+    await collector.connect();
+    await collector.moveNatRule(String(id), destination ? String(destination) : undefined);
+    return res.json(await collector.getNatRules());
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  } finally {
+    collector.disconnect();
+  }
+});
+
+// ─── Firewall Address Lists ─────────────────────────────────────────────────────
+// Shared helper for the security-feature routes below (DRYs the device fetch +
+// connect/disconnect lifecycle the rest of this file uses inline).
+async function withCollector<T>(
+  id: string,
+  res: Response,
+  fn: (c: DeviceCollector) => Promise<T>
+): Promise<void> {
+  const deviceRow = await queryOne<DeviceRow>(`SELECT * FROM devices WHERE id = $1`, [id]);
+  if (!deviceRow) { res.status(404).json({ error: 'Device not found' }); return; }
+  const collector = new DeviceCollector(deviceRow);
+  try {
+    await collector.connect();
+    const result = await fn(collector);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  } finally {
+    collector.disconnect();
+  }
+}
+
+router.get('/:id/address-lists', async (req, res) => {
+  await withCollector(req.params.id, res, (c) => c.getAddressLists());
+});
+
+router.post('/:id/address-lists', requireWrite, async (req, res) => {
+  const { list, address } = req.body;
+  if (!list || !address) return res.status(400).json({ error: 'list and address are required' });
+  const params: Record<string, string> = { list: String(list), address: String(address) };
+  if (req.body.comment) params.comment = String(req.body.comment);
+  if (req.body.timeout) params.timeout = String(req.body.timeout);
+  await withCollector(req.params.id, res, async (c) => { await c.addAddressListEntry(params); return c.getAddressLists(); });
+});
+
+router.put('/:id/address-lists/:entryId', requireWrite, async (req, res) => {
+  const params: Record<string, string> = {};
+  for (const k of ['list', 'address', 'comment'] as const) if (req.body[k] !== undefined) params[k] = String(req.body[k]);
+  if (req.body.disabled !== undefined) params.disabled = req.body.disabled ? 'yes' : 'no';
+  await withCollector(req.params.id, res, async (c) => { await c.updateAddressListEntry(req.params.entryId, params); return c.getAddressLists(); });
+});
+
+router.delete('/:id/address-lists/:entryId', requireWrite, async (req, res) => {
+  await withCollector(req.params.id, res, async (c) => { await c.removeAddressListEntry(req.params.entryId); return { message: 'Entry removed' }; });
+});
+
+// ─── Active Connections (read-only) ─────────────────────────────────────────────
+router.get('/:id/connections', async (req, res) => {
+  const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 2000);
+  await withCollector(req.params.id, res, async (c) => {
+    const rows = await c.getConnections();
+    // Connection tables can be huge; cap and surface the total so the UI can note truncation.
+    return { total: rows.length, connections: rows.slice(0, limit) };
+  });
+});
+
+// ─── Simple Queues (bandwidth control) ──────────────────────────────────────────
+const QUEUE_FIELD_MAP: Record<string, string> = {
+  name: 'name', target: 'target', max_limit: 'max-limit', burst_limit: 'burst-limit',
+  burst_threshold: 'burst-threshold', burst_time: 'burst-time', priority: 'priority',
+  comment: 'comment', parent: 'parent',
+};
+function queueBodyToRos(body: Record<string, unknown>): Record<string, string> {
+  const p: Record<string, string> = {};
+  for (const [js, ros] of Object.entries(QUEUE_FIELD_MAP)) {
+    const v = body[js];
+    if (v !== undefined && v !== null && v !== '') p[ros] = String(v);
+  }
+  if (body.disabled !== undefined) p.disabled = body.disabled ? 'yes' : 'no';
+  return p;
+}
+
+router.get('/:id/queues', async (req, res) => {
+  await withCollector(req.params.id, res, (c) => c.getSimpleQueues());
+});
+
+router.post('/:id/queues', requireWrite, async (req, res) => {
+  const { name, target, max_limit } = req.body;
+  if (!name || !target || !max_limit) return res.status(400).json({ error: 'name, target and max_limit are required' });
+  await withCollector(req.params.id, res, async (c) => { await c.addSimpleQueue(queueBodyToRos(req.body)); return c.getSimpleQueues(); });
+});
+
+router.put('/:id/queues/:queueId', requireWrite, async (req, res) => {
+  await withCollector(req.params.id, res, async (c) => { await c.updateSimpleQueue(req.params.queueId, queueBodyToRos(req.body)); return c.getSimpleQueues(); });
+});
+
+router.delete('/:id/queues/:queueId', requireWrite, async (req, res) => {
+  await withCollector(req.params.id, res, async (c) => { await c.removeSimpleQueue(req.params.queueId); return { message: 'Queue removed' }; });
+});
+
+// ─── IP Services + Security Posture audit ────────────────────────────────────────
+router.get('/:id/services', async (req, res) => {
+  await withCollector(req.params.id, res, (c) => c.getServices());
+});
+
+router.put('/:id/services/:serviceId', requireWrite, async (req, res) => {
+  if (typeof req.body.disabled !== 'boolean') return res.status(400).json({ error: 'disabled (boolean) is required' });
+  await withCollector(req.params.id, res, async (c) => { await c.setServiceDisabled(req.params.serviceId, req.body.disabled); return c.getServices(); });
+});
+
+// GET /api/devices/:id/security-posture — computes a hardening checklist.
+// Heuristic, not standards-based: graduated weighting that won't saturate to 0,
+// de-duplicated services, and it never proposes disabling the management
+// service MikroTik Manager itself connects through (that would self-lockout).
+router.get('/:id/security-posture', async (req, res) => {
+  const device = await queryOne<DeviceRow>(`SELECT * FROM devices WHERE id = $1`, [req.params.id]);
+  if (!device) return res.status(404).json({ error: 'Device not found' });
+  // Which RouterOS service the platform uses to reach this device. Default api
+  // (8728); api-ssl is 8729. We must never offer to disable this one.
+  const mgmtService = device.api_port === 8729 ? 'api-ssl' : 'api';
+  const isRouter = device.device_type === 'router';
+
+  await withCollector(req.params.id, res, async (c) => {
+    const [servicesRaw, fwRules, snmp] = await Promise.all([
+      c.getServices().catch(() => [] as Record<string, string>[]),
+      c.getFirewallRules().catch(() => [] as Record<string, string>[]),
+      c.getSnmpConfig().catch(() => ({} as Record<string, string>)),
+    ]);
+
+    // De-duplicate /ip/service rows by name (some devices report duplicates,
+    // e.g. api/route_BFD twice) so a service is only ever counted once.
+    const services = Array.from(new Map(servicesRaw.map(s => [s['name'] ?? s['.id'], s])).values());
+
+    type Sev = 'high' | 'medium' | 'low';
+    type Check = { id: string; severity: Sev; title: string; detail: string; serviceId?: string };
+    const checks: Check[] = [];
+
+    for (const s of services) {
+      const name = s['name'] ?? '';
+      if (s['disabled'] === 'true') continue;
+
+      if (name === 'telnet' || name === 'ftp') {
+        checks.push({ id: `service-${name}`, severity: 'high', serviceId: s['.id'],
+          title: `Cleartext service "${name}" is enabled`,
+          detail: `${name} sends credentials and data unencrypted. Disable it; use SSH/SFTP instead.` });
+      } else if (name === 'www') {
+        checks.push({ id: 'service-www', severity: 'medium', serviceId: s['.id'],
+          title: 'Unencrypted WebFig (www) is enabled',
+          detail: 'The HTTP WebFig interface is unencrypted. Disable "www" and use "www-ssl" (HTTPS) instead.' });
+      } else if (name === 'api' && mgmtService !== 'api') {
+        // Plaintext API is on but the platform connects via api-ssl — safe to flag/disable.
+        checks.push({ id: 'service-api', severity: 'medium', serviceId: s['.id'],
+          title: 'Unencrypted API (api) is enabled',
+          detail: 'The plaintext RouterOS API is exposed. Disable "api" and use "api-ssl" (8729).' });
+      } else if (name === mgmtService && name === 'api') {
+        // The platform is connected through cleartext API — advise, but do NOT
+        // offer to disable it (that would cut MikroTik Manager off the device).
+        checks.push({ id: 'mgmt-api-cleartext', severity: 'low',
+          title: 'MikroTik Manager connects over cleartext API',
+          detail: 'This device is managed via the unencrypted API (8728). Consider migrating the device and its credentials to API-SSL (8729) for encrypted management.' });
+      }
+    }
+
+    // Input-chain firewall: a real concern on routers; switches/APs commonly
+    // (and legitimately) rely on an upstream router's firewall, so it's only
+    // informational there rather than a high-severity hit.
+    const hasInputDrop = fwRules.some(r => (r['chain'] === 'input') && ['drop', 'reject'].includes(r['action'] ?? '') && r['disabled'] !== 'true');
+    if (!hasInputDrop) {
+      checks.push({
+        id: 'no-input-firewall', severity: isRouter ? 'high' : 'low',
+        title: 'No input-chain firewall rule',
+        detail: isRouter
+          ? 'This router has no enabled drop/reject rule on the input chain, leaving its own services exposed. Add a baseline input firewall.'
+          : 'No input-chain firewall on this device. Switches/APs often rely on an upstream router firewall — confirm that is the case.',
+      });
+    }
+
+    if (snmp && snmp['enabled'] === 'true') {
+      checks.push({ id: 'snmp-enabled', severity: 'low', title: 'SNMP is enabled',
+        detail: 'Ensure SNMP uses a non-default community string and is restricted to trusted addresses.' });
+    }
+
+    // Graduated score: lighter weights + a floor of 5 so it never reads a hard
+    // 0 (which falsely implies "maximally insecure"). It's a relative hardening
+    // indicator, not an absolute grade.
+    const WEIGHT: Record<Sev, number> = { high: 15, medium: 7, low: 3 };
+    const penalty = checks.reduce((n, c2) => n + WEIGHT[c2.severity], 0);
+    const score = checks.length === 0 ? 100 : Math.max(5, 100 - penalty);
+    return { score, checks };
+  });
 });
 
 // GET /api/devices/:id/resources (live resource usage)

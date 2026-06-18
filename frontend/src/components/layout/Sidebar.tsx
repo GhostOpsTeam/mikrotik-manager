@@ -15,6 +15,7 @@ const navItems = [
   { to: '/devices',   icon: Router,          label: 'Devices' },
   { to: '/clients',   icon: Users,           label: 'Clients' },
   { to: '/traffic',   icon: Activity,        label: 'Traffic' },
+  { to: '/security',  icon: Shield,          label: 'Security' },
   { to: '/events',    icon: Bell,            label: 'Events' },
   { to: '/topology',  icon: GitBranch,       label: 'Topology' },
   { to: '/backups',   icon: HardDrive,       label: 'Backups' },

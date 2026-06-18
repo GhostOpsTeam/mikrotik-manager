@@ -135,6 +135,14 @@ export interface BulkAddJobStatus {
   [key: string]: unknown;
 }
 
+export interface SecurityCheck {
+  id: string;
+  severity: 'high' | 'medium' | 'low' | 'ok';
+  title: string;
+  detail: string;
+  serviceId?: string;
+}
+
 export const devicesApi = {
   list: () => api.get<Device[]>('/devices'),
   discovered: () => api.get<DiscoveredDevice[]>('/devices/discovered'),
@@ -236,6 +244,38 @@ export const devicesApi = {
     api.put<Record<string, string>[]>(`/devices/${id}/nat/${encodeURIComponent(ruleId)}`, data),
   deleteNatRule: (id: number, ruleId: string) =>
     api.delete(`/devices/${id}/nat/${encodeURIComponent(ruleId)}`),
+  // Firewall: reorder + counters (order is decisive in RouterOS)
+  moveFirewallRule: (id: number, ruleId: string, destination?: string) =>
+    api.post<Record<string, string>[]>(`/devices/${id}/firewall/move`, { id: ruleId, destination }),
+  resetFirewallCounters: (id: number) =>
+    api.post<Record<string, string>[]>(`/devices/${id}/firewall/reset-counters`),
+  moveNatRule: (id: number, ruleId: string, destination?: string) =>
+    api.post<Record<string, string>[]>(`/devices/${id}/nat/move`, { id: ruleId, destination }),
+  // Firewall address lists (reusable address objects)
+  getAddressLists: (id: number) => api.get<Record<string, string>[]>(`/devices/${id}/address-lists`),
+  addAddressListEntry: (id: number, data: { list: string; address: string; comment?: string; timeout?: string }) =>
+    api.post<Record<string, string>[]>(`/devices/${id}/address-lists`, data),
+  updateAddressListEntry: (id: number, entryId: string, data: Record<string, unknown>) =>
+    api.put<Record<string, string>[]>(`/devices/${id}/address-lists/${encodeURIComponent(entryId)}`, data),
+  removeAddressListEntry: (id: number, entryId: string) =>
+    api.delete(`/devices/${id}/address-lists/${encodeURIComponent(entryId)}`),
+  // Active connections (read-only)
+  getConnections: (id: number, limit = 500) =>
+    api.get<{ total: number; connections: Record<string, string>[] }>(`/devices/${id}/connections`, { params: { limit } }),
+  // Simple queues (bandwidth control)
+  getQueues: (id: number) => api.get<Record<string, string>[]>(`/devices/${id}/queues`),
+  addQueue: (id: number, data: Record<string, unknown>) =>
+    api.post<Record<string, string>[]>(`/devices/${id}/queues`, data),
+  updateQueue: (id: number, queueId: string, data: Record<string, unknown>) =>
+    api.put<Record<string, string>[]>(`/devices/${id}/queues/${encodeURIComponent(queueId)}`, data),
+  removeQueue: (id: number, queueId: string) =>
+    api.delete(`/devices/${id}/queues/${encodeURIComponent(queueId)}`),
+  // IP services + security posture
+  getServices: (id: number) => api.get<Record<string, string>[]>(`/devices/${id}/services`),
+  setServiceDisabled: (id: number, serviceId: string, disabled: boolean) =>
+    api.put<Record<string, string>[]>(`/devices/${id}/services/${encodeURIComponent(serviceId)}`, { disabled }),
+  getSecurityPosture: (id: number) =>
+    api.get<{ score: number; checks: SecurityCheck[] }>(`/devices/${id}/security-posture`),
   patchLocation: (id: number, data: {
     location_address?: string | null;
     location_lat?: number | null;

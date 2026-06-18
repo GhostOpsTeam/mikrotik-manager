@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Wifi, Network, Router, Layers, Activity,
-  Power, Save, Clock, ChevronRight, AlertCircle, Pencil, X,
+  Power, Save, Clock, ChevronRight, AlertCircle, Pencil, X, Gauge, Check,
 } from 'lucide-react';
 import { useCanWrite } from '../hooks/useCanWrite';
 import {
@@ -11,7 +11,7 @@ import {
   BarChart, Bar, Cell, ReferenceLine,
 } from 'recharts';
 import { format, formatDistanceToNow, parseISO } from 'date-fns';
-import { clientsApi, trafficApi } from '../services/api';
+import { clientsApi, trafficApi, devicesApi } from '../services/api';
 import type { ClientDetail } from '../services/api';
 import type { SignalPoint } from '../services/api';
 import clsx from 'clsx';
@@ -244,6 +244,64 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
+// Quick per-client bandwidth cap: creates a RouterOS simple queue on the
+// client's device targeting its IP. Mirrors the Queues tab but one-click.
+function LimitBandwidth({ deviceId, ip, name }: { deviceId: number; ip: string; name: string }) {
+  const [open, setOpen] = useState(false);
+  const [up, setUp] = useState('10M');
+  const [down, setDown] = useState('50M');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'done' | 'error'>('idle');
+  const [error, setError] = useState('');
+
+  const apply = async () => {
+    setStatus('saving'); setError('');
+    try {
+      await devicesApi.addQueue(deviceId, {
+        name: `mm-${name}-${ip}`.slice(0, 60).replace(/[^a-zA-Z0-9._-]/g, '_'),
+        target: ip,
+        max_limit: `${up || '0'}/${down || '0'}`,
+        comment: `Limit for ${name} (MikroTik Manager)`,
+      });
+      setStatus('done'); setTimeout(() => { setStatus('idle'); setOpen(false); }, 2500);
+    } catch (e) {
+      setStatus('error');
+      setError((e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to create queue');
+    }
+  };
+
+  return (
+    <div className="pt-1">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-gray-700 dark:text-slate-300">Bandwidth limit</span>
+      </div>
+      {!open ? (
+        <button onClick={() => setOpen(true)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors">
+          <Gauge className="w-3.5 h-3.5" /> Limit this client
+        </button>
+      ) : (
+        <div className="space-y-2 border border-emerald-200 dark:border-emerald-800 rounded-lg p-2.5">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[10px] text-gray-500 dark:text-slate-400">Upload
+              <input className="input font-mono mt-0.5 py-1 text-xs" value={up} onChange={e => setUp(e.target.value)} placeholder="10M" /></label>
+            <label className="text-[10px] text-gray-500 dark:text-slate-400">Download
+              <input className="input font-mono mt-0.5 py-1 text-xs" value={down} onChange={e => setDown(e.target.value)} placeholder="50M" /></label>
+          </div>
+          {error && <p className="text-[10px] text-red-500">{error}</p>}
+          <div className="flex items-center gap-2">
+            <button onClick={apply} disabled={status === 'saving'}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+              {status === 'done' ? <><Check className="w-3 h-3" /> Applied</> : status === 'saving' ? 'Applying…' : 'Apply limit'}
+            </button>
+            <button onClick={() => { setOpen(false); setStatus('idle'); setError(''); }} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-slate-300">Cancel</button>
+          </div>
+          <p className="text-[10px] text-gray-400 dark:text-slate-500">Creates a simple queue on the device for <span className="font-mono">{ip}</span>. Manage it later under the device&apos;s Bandwidth tab.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClientDetailsCard({ client, canWrite }: { client: ClientDetail; canWrite: boolean }) {
   const qc = useQueryClient();
   const [notes, setNotes] = useState(client.comment || '');
@@ -442,6 +500,11 @@ function ClientDetailsCard({ client, canWrite }: { client: ClientDetail; canWrit
             Sends a UDP broadcast magic packet to wake this client.
           </p>
         </div>
+      )}
+
+      {/* Limit bandwidth — creates a simple queue on the client's device targeting its IP */}
+      {canWrite && client.ip_address && client.device_id && (
+        <LimitBandwidth deviceId={client.device_id} ip={client.ip_address} name={client.custom_name || client.hostname || client.mac_address} />
       )}
 
       {/* Notes */}
