@@ -1,15 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   FileText, RefreshCw, AlertTriangle, Plus, Pencil, Trash2, X, Save,
-  CheckCircle, XCircle, Layers,
+  CheckCircle, XCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { networkServicesApi, devicesApi } from '../services/api';
 import { useCanWrite } from '../hooks/useCanWrite';
 
 type NS = Record<string, string>;
-type Mode = 'single' | 'all';
 
 interface PushResult { name: string; success: boolean; error?: string }
 interface DeviceCoverage { deviceId: number; deviceName: string; rowId: string }
@@ -114,13 +113,14 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 interface ActionFormProps {
   existing?: NS;
   allDevices?: boolean;
+  targetName?: string; // single target device name (single-device add)
   onSave: (data: NS) => void;
   onClose: () => void;
   isPending: boolean;
   error?: string;
 }
 
-function ActionForm({ existing, allDevices, onSave, onClose, isPending, error }: ActionFormProps) {
+function ActionForm({ existing, allDevices, targetName, onSave, onClose, isPending, error }: ActionFormProps) {
   const isBuiltin = existing ? BUILTIN_ACTION_NAMES.includes(existing['name'] ?? '') : false;
 
   const [name, setName]         = useState(existing?.['name'] ?? '');
@@ -133,6 +133,12 @@ function ActionForm({ existing, allDevices, onSave, onClose, isPending, error }:
   const [bsd, setBsd]           = useState((existing?.['bsd-syslog'] ?? 'no') === 'yes');
 
   const canSave = name.trim() !== '' && (type !== 'remote' || remote.trim() !== '');
+
+  const title = existing
+    ? 'Edit Logging Action'
+    : targetName
+      ? `Add Logging Action — ${targetName}`
+      : allDevices ? 'Add Logging Action — All Devices' : 'Add Logging Action';
 
   function handleSubmit() {
     const data: NS = { name: name.trim(), type };
@@ -151,9 +157,7 @@ function ActionForm({ existing, allDevices, onSave, onClose, isPending, error }:
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-slate-700">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            {existing ? 'Edit Logging Action' : allDevices ? 'Add Logging Action — All Devices' : 'Add Logging Action'}
-          </h3>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-300">
             <X className="w-4 h-4" />
           </button>
@@ -232,19 +236,26 @@ interface RuleFormProps {
   existing?: NS;
   actions: NS[];
   allDevices?: boolean;
+  targetName?: string; // single target device name (single-device add)
   onSave: (data: NS) => void;
   onClose: () => void;
   isPending: boolean;
   error?: string;
 }
 
-function RuleForm({ existing, actions, allDevices, onSave, onClose, isPending, error }: RuleFormProps) {
+function RuleForm({ existing, actions, allDevices, targetName, onSave, onClose, isPending, error }: RuleFormProps) {
   const [topics, setTopics]     = useState(existing?.['topics'] ?? '');
   const [action, setAction]     = useState(existing?.['action'] ?? (allDevices ? '' : (actions[0]?.['name'] ?? '')));
   const [prefix, setPrefix]     = useState(existing?.['prefix'] ?? '');
   const [disabled, setDisabled] = useState((existing?.['disabled'] ?? 'false') === 'true');
 
   const canSave = topics.trim() !== '' && action.trim() !== '';
+
+  const title = existing
+    ? 'Edit Logging Rule'
+    : targetName
+      ? `Add Logging Rule — ${targetName}`
+      : allDevices ? 'Add Logging Rule — All Devices' : 'Add Logging Rule';
 
   function handleSubmit() {
     const data: NS = { topics: topics.trim(), action: action.trim() };
@@ -257,9 +268,7 @@ function RuleForm({ existing, actions, allDevices, onSave, onClose, isPending, e
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-slate-700">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            {existing ? 'Edit Logging Rule' : allDevices ? 'Add Logging Rule — All Devices' : 'Add Logging Rule'}
-          </h3>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-300">
             <X className="w-4 h-4" />
           </button>
@@ -309,26 +318,53 @@ function RuleForm({ existing, actions, allDevices, onSave, onClose, isPending, e
   );
 }
 
+// ─── Add-to-device control (dropdown + button) ─────────────────────────────────
+
+function AddToDevice({
+  devices, value, onChange, onAdd,
+}: {
+  devices: { id: number; name: string }[];
+  value: number | '';
+  onChange: (id: number) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <select
+        value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        className="text-xs rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-700 dark:text-slate-200 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[10rem]"
+        title="Choose a device to add to"
+      >
+        {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+      </select>
+      <button onClick={onAdd}
+        className="flex items-center gap-1 px-2.5 py-1 border border-blue-600 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 text-xs font-medium rounded-lg transition-colors whitespace-nowrap">
+        <Plus className="w-3.5 h-3.5" />Add to device
+      </button>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function NetworkServicesSyslogPage() {
   const canWrite = useCanWrite();
   const qc = useQueryClient();
 
-  const [mode, setMode] = useState<Mode>('single');
-  const [selectedDeviceId, setSelectedDeviceId] = useState<number | ''>('');
-
-  // Single-device form state (allCoverage set when editing in All Devices mode)
-  const [actionForm, setActionForm]   = useState<{ existing?: NS; allCoverage?: DeviceCoverage[] } | null>(null);
-  const [ruleForm, setRuleForm]       = useState<{ existing?: NS; allCoverage?: DeviceCoverage[] } | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<{ type: 'action' | 'rule'; row: NS } | null>(null);
-  const [deletePending, setDeletePending] = useState(false);
-  const [deleteError, setDeleteError]     = useState('');
+  // Form state. `targetDeviceId` → single-device add; `allCoverage` → edit
+  // across the devices that already have the row; neither → add to all.
+  const [actionForm, setActionForm] = useState<{ existing?: NS; allCoverage?: DeviceCoverage[]; targetDeviceId?: number } | null>(null);
+  const [ruleForm, setRuleForm]     = useState<{ existing?: NS; allCoverage?: DeviceCoverage[]; targetDeviceId?: number } | null>(null);
+  const [savePending, setSavePending] = useState(false);
+  const [saveError, setSaveError]     = useState('');
   const [togglePending, setTogglePending] = useState(false);
-  const [savePending, setSavePending]     = useState(false);
-  const [saveError, setSaveError]         = useState('');
 
-  // All-devices state
+  // Selected target for the per-section "Add to device" dropdowns
+  const [addActionDeviceId, setAddActionDeviceId] = useState<number | ''>('');
+  const [addRuleDeviceId, setAddRuleDeviceId]     = useState<number | ''>('');
+
+  // Push / delete-all flow
   const [pendingPush, setPendingPush]     = useState<PendingOp | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState<{ type: 'action' | 'rule'; coverage: DeviceCoverage[]; label: string } | null>(null);
   const [isPushing, setIsPushing]         = useState(false);
@@ -342,17 +378,7 @@ export default function NetworkServicesSyslogPage() {
 
   const onlineDevices = devices.filter(d => d.status === 'online');
 
-  const deviceId = typeof selectedDeviceId === 'number' ? selectedDeviceId : 0;
-  const selectedDevice = devices.find(d => d.id === deviceId);
-
-  // Single-device data
-  const { data: syslog, isLoading, refetch, isFetching, error } = useQuery({
-    queryKey: ['ns-syslog', deviceId],
-    queryFn: () => networkServicesApi.getSyslog(deviceId).then(r => r.data),
-    enabled: mode === 'single' && deviceId > 0,
-  });
-
-  // All-devices aggregated data
+  // Aggregated data across all online devices
   const allDevicesKey = onlineDevices.map(d => d.id).join(',');
   const { data: allDevicesSyslog = [], isLoading: allLoading, refetch: allRefetch, isFetching: allFetching } = useQuery({
     queryKey: ['ns-syslog-all', allDevicesKey],
@@ -364,92 +390,35 @@ export default function NetworkServicesSyslogPage() {
         .filter(r => r.status === 'fulfilled')
         .map(r => (r as PromiseFulfilledResult<{ deviceId: number; deviceName: string; actions: NS[]; rules: NS[] }>).value);
     },
-    enabled: mode === 'all' && onlineDevices.length > 0,
+    enabled: onlineDevices.length > 0,
   });
 
   const aggregatedActions = aggregateActions(allDevicesSyslog);
   const aggregatedRules   = aggregateRules(allDevicesSyslog);
 
-  const singleActions = syslog?.actions ?? [];
-  const singleRules   = syslog?.rules   ?? [];
-
-  function invalidateSingle() {
-    qc.invalidateQueries({ queryKey: ['ns-syslog', deviceId] });
-    qc.invalidateQueries({ queryKey: ['network-services-overview'] });
-  }
+  // Resolve the active add-target for each section (default: first online device)
+  const actionTarget = (typeof addActionDeviceId === 'number' ? addActionDeviceId : onlineDevices[0]?.id) ?? '';
+  const ruleTarget   = (typeof addRuleDeviceId === 'number' ? addRuleDeviceId : onlineDevices[0]?.id) ?? '';
+  const ruleTargetActions = allDevicesSyslog.find(ds => ds.deviceId === ruleTarget)?.actions ?? [];
 
   function invalidateAll() {
     qc.invalidateQueries({ queryKey: ['ns-syslog-all'] });
     qc.invalidateQueries({ queryKey: ['network-services-overview'] });
   }
 
-  useEffect(() => {
-    setActionForm(null); setRuleForm(null); setSaveError('');
-    setPendingPush(null); setOpResults(null);
-  }, [mode]);
-
-  useEffect(() => {
-    setActionForm(null); setRuleForm(null); setSaveError('');
-  }, [deviceId]);
-
-  // ── Single-device handlers ────────────────────────────────────────────────
-
-  async function handleSaveAction(data: NS) {
+  // ── Single-device add (direct, no review) ─────────────────────────────────
+  async function handleSingleAdd(type: 'action' | 'rule', data: NS, targetDeviceId: number) {
     setSaveError(''); setSavePending(true);
     try {
-      if (actionForm?.existing) {
-        await networkServicesApi.updateSyslogAction(deviceId, actionForm.existing['.id'], data);
-      } else {
-        await networkServicesApi.addSyslogAction(deviceId, data);
-      }
-      setActionForm(null); invalidateSingle();
-    } catch (e) { setSaveError((e as Error).message); }
-    finally { setSavePending(false); }
-  }
-
-  async function handleSaveRule(data: NS) {
-    setSaveError(''); setSavePending(true);
-    try {
-      if (ruleForm?.existing) {
-        await networkServicesApi.updateSyslogRule(deviceId, ruleForm.existing['.id'], data);
-      } else {
-        await networkServicesApi.addSyslogRule(deviceId, data);
-      }
-      setRuleForm(null); invalidateSingle();
-    } catch (e) { setSaveError((e as Error).message); }
-    finally { setSavePending(false); }
-  }
-
-  async function handleSingleDelete() {
-    if (!confirmDelete) return;
-    setDeleteError(''); setDeletePending(true);
-    try {
-      if (confirmDelete.type === 'action') {
-        await networkServicesApi.deleteSyslogAction(deviceId, confirmDelete.row['.id']);
-      } else {
-        await networkServicesApi.deleteSyslogRule(deviceId, confirmDelete.row['.id']);
-      }
-      setConfirmDelete(null); invalidateSingle();
-    } catch (e) { setDeleteError((e as Error).message); }
-    finally { setDeletePending(false); }
-  }
-
-  async function handleToggleRule(id: string, disabled: boolean) {
-    setTogglePending(true);
-    try { await networkServicesApi.toggleSyslogRule(deviceId, id, disabled); invalidateSingle(); }
-    finally { setTogglePending(false); }
-  }
-
-  async function handleToggleRuleAll(coverage: DeviceCoverage[], disabled: boolean) {
-    setTogglePending(true);
-    try {
-      await Promise.allSettled(coverage.map(c => networkServicesApi.toggleSyslogRule(c.deviceId, c.rowId, disabled)));
+      if (type === 'action') await networkServicesApi.addSyslogAction(targetDeviceId, data);
+      else await networkServicesApi.addSyslogRule(targetDeviceId, data);
+      setActionForm(null); setRuleForm(null);
       invalidateAll();
-    } finally { setTogglePending(false); }
+    } catch (e) { setSaveError((e as Error).message); }
+    finally { setSavePending(false); }
   }
 
-  // ── All-devices handlers ──────────────────────────────────────────────────
-
+  // ── All-devices add / update (review then push) ───────────────────────────
   function handleAllDevicesSave(type: 'action' | 'rule', data: NS, coverage?: DeviceCoverage[]) {
     setPendingPush({ type, operation: coverage ? 'update' : 'add', data, coverage });
     setActionForm(null); setRuleForm(null);
@@ -533,136 +502,12 @@ export default function NetworkServicesSyslogPage() {
     invalidateAll();
   }
 
-  // ── Shared table renderers ────────────────────────────────────────────────
-
-  function renderActionsTable(rows: NS[], isBuiltinFn: (r: NS) => boolean, onEdit: (r: NS) => void, onDelete: (r: NS) => void) {
-    return (
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/40">
-              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Name</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Type</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Destination</th>
-              <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((action, i) => {
-              const isBuiltin = isBuiltinFn(action);
-              return (
-                <tr key={action['.id'] ?? i}
-                  className={clsx('border-b border-gray-100 dark:border-slate-800 transition-colors hover:bg-blue-50 dark:hover:bg-slate-700/40',
-                    i % 2 === 0 ? 'bg-white dark:bg-transparent' : 'bg-gray-50 dark:bg-slate-800/40')}>
-                  <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
-                    {action['name']}{isBuiltin && <span className="ml-2 text-xs text-gray-400 dark:text-slate-500">(built-in)</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
-                      action['type'] === 'remote'
-                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                        : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-400')}>
-                      {action['type']}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-700 dark:text-slate-300">
-                    {action['type'] === 'remote' ? (
-                      <div>
-                        <span className="font-mono text-xs">{action['remote'] || '—'}:{action['remote-port'] || '514'}</span>
-                        <div className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">
-                          {action['syslog-facility'] || 'daemon'} / {action['syslog-severity'] || 'auto'}
-                          {action['bsd-syslog'] === 'yes' && ' · BSD'}
-                        </div>
-                      </div>
-                    ) : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {canWrite && (
-                        <button onClick={() => onEdit(action)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors" title="Edit">
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {canWrite && !isBuiltin && (
-                        <button onClick={() => onDelete(action)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-700 transition-colors" title="Delete">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  function renderRulesTable(rows: NS[], onEdit: (r: NS) => void, onToggle: ((r: NS) => void) | null, onDelete: (r: NS) => void) {
-    return (
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/40">
-              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Topics</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Action</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Prefix</th>
-              <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Status</th>
-              <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((rule, i) => {
-              const isDisabled = rule['disabled'] === 'true' || rule['disabled'] === 'yes';
-              return (
-                <tr key={rule['.id'] ?? i}
-                  className={clsx('border-b border-gray-100 dark:border-slate-800 transition-colors hover:bg-blue-50 dark:hover:bg-slate-700/40',
-                    i % 2 === 0 ? 'bg-white dark:bg-transparent' : 'bg-gray-50 dark:bg-slate-800/40')}>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-900 dark:text-white">{rule['topics'] || '—'}</td>
-                  <td className="px-4 py-3 text-gray-700 dark:text-slate-300">{rule['action'] || '—'}</td>
-                  <td className="px-4 py-3 text-gray-500 dark:text-slate-400 text-xs">{rule['prefix'] || '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
-                      isDisabled
-                        ? 'bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-slate-400'
-                        : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400')}>
-                      <span className={clsx('w-1.5 h-1.5 rounded-full', isDisabled ? 'bg-gray-400' : 'bg-green-500')} />
-                      {isDisabled ? 'Disabled' : 'Enabled'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {canWrite && (
-                        <>
-                          <button onClick={() => onEdit(rule)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors" title="Edit">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          {onToggle && (
-                            <button onClick={() => onToggle(rule)} disabled={togglePending}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
-                              title={isDisabled ? 'Enable' : 'Disable'}>
-                              <span className="text-xs font-medium">{isDisabled ? 'En' : 'Dis'}</span>
-                            </button>
-                          )}
-                          <button onClick={() => onDelete(rule)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-700 transition-colors" title="Delete">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
+  async function handleToggleRuleAll(coverage: DeviceCoverage[], disabled: boolean) {
+    setTogglePending(true);
+    try {
+      await Promise.allSettled(coverage.map(c => networkServicesApi.toggleSyslogRule(c.deviceId, c.rowId, disabled)));
+      invalidateAll();
+    } finally { setTogglePending(false); }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -673,15 +518,11 @@ export default function NetworkServicesSyslogPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">Syslog</h1>
-          <p className="text-sm text-gray-500 dark:text-slate-400">Logging actions and routing rules configuration</p>
+          <p className="text-sm text-gray-500 dark:text-slate-400">
+            Logging actions and routing rules across your fleet. Coverage shows how many devices share each entry.
+          </p>
         </div>
-        {mode === 'single' && deviceId > 0 && (
-          <button onClick={() => refetch()} disabled={isFetching}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors">
-            <RefreshCw className={clsx('w-3.5 h-3.5', isFetching && 'animate-spin')} />Refresh
-          </button>
-        )}
-        {mode === 'all' && onlineDevices.length > 0 && (
+        {onlineDevices.length > 0 && (
           <button onClick={() => allRefetch()} disabled={allFetching}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors">
             <RefreshCw className={clsx('w-3.5 h-3.5', allFetching && 'animate-spin')} />Refresh
@@ -689,342 +530,261 @@ export default function NetworkServicesSyslogPage() {
         )}
       </div>
 
-      {/* Mode toggle */}
-      <div className="card p-1 flex w-fit rounded-lg gap-1">
-        <button onClick={() => setMode('single')}
-          className={clsx('px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
-            mode === 'single'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700')}>
-          Single Device
-        </button>
-        <button onClick={() => setMode('all')}
-          className={clsx('flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
-            mode === 'all'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700')}>
-          <Layers className="w-3.5 h-3.5" />All Devices
-        </button>
-      </div>
-
-      {/* ═══ SINGLE DEVICE ═══════════════════════════════════════════════════ */}
-      {mode === 'single' && (
-        <>
-          <div className="card p-4">
-            <label className="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-2">Select Device</label>
-            <select className="input w-full max-w-xs" value={selectedDeviceId}
-              onChange={e => setSelectedDeviceId(e.target.value === '' ? '' : parseInt(e.target.value))}>
-              <option value="">— Choose a device —</option>
-              {devices.map(d => (
-                <option key={d.id} value={d.id}>{d.name} ({d.ip_address}){d.status !== 'online' ? ' — offline' : ''}</option>
-              ))}
-            </select>
-            {selectedDevice?.status !== 'online' && deviceId > 0 && (
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="w-3.5 h-3.5" />This device is currently offline.
-              </div>
-            )}
-          </div>
-
-          {deviceId === 0 && <div className="card p-8 text-center text-sm text-gray-400 dark:text-slate-500">Select a device above.</div>}
-          {deviceId > 0 && isLoading && <div className="card p-8 text-center text-sm text-gray-400 dark:text-slate-500">Loading…</div>}
-          {deviceId > 0 && error && (
-            <div className="card p-4 flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
-              <AlertTriangle className="w-4 h-4 flex-shrink-0" />Failed: {(error as Error).message}
-            </div>
-          )}
-
-          {syslog && (
-            <div className="space-y-6">
-              <div className="card overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-200 dark:border-slate-700 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-blue-500" />
-                  <h2 className="text-sm font-semibold text-gray-700 dark:text-slate-200">
-                    Logging Actions<span className="ml-2 text-xs font-normal text-gray-400 dark:text-slate-500">({singleActions.length})</span>
-                  </h2>
-                  {canWrite && (
-                    <button onClick={() => setActionForm({})}
-                      className="ml-auto flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors">
-                      <Plus className="w-3.5 h-3.5" />Add Action
-                    </button>
-                  )}
-                </div>
-                {singleActions.length === 0
-                  ? <div className="p-6 text-center text-sm text-gray-400 dark:text-slate-500">No logging actions found.</div>
-                  : renderActionsTable(
-                      singleActions,
-                      r => BUILTIN_ACTION_NAMES.includes(r['name'] ?? ''),
-                      r => setActionForm({ existing: r }),
-                      r => { setConfirmDelete({ type: 'action', row: r }); setDeleteError(''); }
-                    )
-                }
-              </div>
-
-              <div className="card overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-200 dark:border-slate-700 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-indigo-500" />
-                  <h2 className="text-sm font-semibold text-gray-700 dark:text-slate-200">
-                    Logging Rules<span className="ml-2 text-xs font-normal text-gray-400 dark:text-slate-500">({singleRules.length})</span>
-                  </h2>
-                  {canWrite && (
-                    <button onClick={() => setRuleForm({})}
-                      className="ml-auto flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors">
-                      <Plus className="w-3.5 h-3.5" />Add Rule
-                    </button>
-                  )}
-                </div>
-                {singleRules.length === 0
-                  ? <div className="p-6 text-center text-sm text-gray-400 dark:text-slate-500">No logging rules found.</div>
-                  : renderRulesTable(
-                      singleRules,
-                      r => setRuleForm({ existing: r }),
-                      r => handleToggleRule(r['.id'], !(r['disabled'] === 'true' || r['disabled'] === 'yes')),
-                      r => { setConfirmDelete({ type: 'rule', row: r }); setDeleteError(''); }
-                    )
-                }
-              </div>
-            </div>
-          )}
-        </>
+      {onlineDevices.length === 0 && (
+        <div className="card p-8 text-center text-sm text-gray-400 dark:text-slate-500">No online devices found.</div>
       )}
 
-      {/* ═══ ALL DEVICES ═════════════════════════════════════════════════════ */}
-      {mode === 'all' && (
+      {onlineDevices.length > 0 && allLoading && (
+        <div className="card p-8 text-center text-sm text-gray-400 dark:text-slate-500">Loading from all devices…</div>
+      )}
+
+      {onlineDevices.length > 0 && !allLoading && (
         <div className="space-y-6">
-          {onlineDevices.length === 0 && (
-            <div className="card p-8 text-center text-sm text-gray-400 dark:text-slate-500">No online devices found.</div>
-          )}
-
-          {onlineDevices.length > 0 && allLoading && (
-            <div className="card p-8 text-center text-sm text-gray-400 dark:text-slate-500">Loading from all devices…</div>
-          )}
-
-          {onlineDevices.length > 0 && !allLoading && (
-            <>
-              {/* Logging Actions */}
-              <div className="card overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-200 dark:border-slate-700 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-blue-500" />
-                  <h2 className="text-sm font-semibold text-gray-700 dark:text-slate-200">
-                    Logging Actions<span className="ml-2 text-xs font-normal text-gray-400 dark:text-slate-500">({aggregatedActions.length} unique)</span>
-                  </h2>
-                  {canWrite && (
-                    <button onClick={() => setActionForm({})}
-                      className="ml-auto flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors">
-                      <Plus className="w-3.5 h-3.5" />Add to All Devices
-                    </button>
-                  )}
-                </div>
-                {aggregatedActions.length === 0
-                  ? <div className="p-6 text-center text-sm text-gray-400 dark:text-slate-500">No logging actions found across online devices.</div>
-                  : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/40">
-                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Name</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Type</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Destination</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Coverage</th>
-                            <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {aggregatedActions.map(({ key, sample, coverage }, i) => {
-                            const isBuiltin = BUILTIN_ACTION_NAMES.includes(sample['name'] ?? '');
-                            return (
-                              <tr key={key}
-                                className={clsx('border-b border-gray-100 dark:border-slate-800 transition-colors hover:bg-blue-50 dark:hover:bg-slate-700/40',
-                                  i % 2 === 0 ? 'bg-white dark:bg-transparent' : 'bg-gray-50 dark:bg-slate-800/40')}>
-                                <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
-                                  {sample['name']}{isBuiltin && <span className="ml-2 text-xs text-gray-400 dark:text-slate-500">(built-in)</span>}
-                                </td>
-                                <td className="px-4 py-3">
-                                  <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
-                                    sample['type'] === 'remote'
-                                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                                      : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-400')}>
-                                    {sample['type']}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-gray-700 dark:text-slate-300">
-                                  {sample['type'] === 'remote' ? (
-                                    <div>
-                                      <span className="font-mono text-xs">{sample['remote'] || '—'}:{sample['remote-port'] || '514'}</span>
-                                      <div className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">
-                                        {sample['syslog-facility'] || 'daemon'} / {sample['syslog-severity'] || 'auto'}
-                                        {sample['bsd-syslog'] === 'yes' && ' · BSD'}
-                                      </div>
-                                    </div>
-                                  ) : '—'}
-                                </td>
-                                <td className="px-4 py-3"><CoverageBadge coverage={coverage} total={onlineDevices.length} /></td>
-                                <td className="px-4 py-3 text-right">
-                                  <div className="flex items-center justify-end gap-1">
-                                    {canWrite && (
-                                      <button
-                                        onClick={() => setActionForm({ existing: sample, allCoverage: coverage })}
-                                        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors" title="Edit on all devices">
-                                        <Pencil className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                    {canWrite && !isBuiltin && (
-                                      <button
-                                        onClick={() => setConfirmDeleteAll({ type: 'action', coverage, label: `action "${sample['name']}"` })}
-                                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-700 transition-colors" title="Remove from all devices">
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                }
-              </div>
-
-              {/* Logging Rules */}
-              <div className="card overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-200 dark:border-slate-700 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-indigo-500" />
-                  <h2 className="text-sm font-semibold text-gray-700 dark:text-slate-200">
-                    Logging Rules<span className="ml-2 text-xs font-normal text-gray-400 dark:text-slate-500">({aggregatedRules.length} unique)</span>
-                  </h2>
-                  {canWrite && (
-                    <button onClick={() => setRuleForm({})}
-                      className="ml-auto flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors">
-                      <Plus className="w-3.5 h-3.5" />Add to All Devices
-                    </button>
-                  )}
-                </div>
-                {aggregatedRules.length === 0
-                  ? <div className="p-6 text-center text-sm text-gray-400 dark:text-slate-500">No logging rules found across online devices.</div>
-                  : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/40">
-                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Topics</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Action</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Prefix</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Status</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Coverage</th>
-                            <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {aggregatedRules.map(({ key, sample, coverage }, i) => {
-                            const isDisabled = sample['disabled'] === 'true' || sample['disabled'] === 'yes';
-                            return (
-                              <tr key={key}
-                                className={clsx('border-b border-gray-100 dark:border-slate-800 transition-colors hover:bg-blue-50 dark:hover:bg-slate-700/40',
-                                  i % 2 === 0 ? 'bg-white dark:bg-transparent' : 'bg-gray-50 dark:bg-slate-800/40')}>
-                                <td className="px-4 py-3 font-mono text-xs text-gray-900 dark:text-white">{sample['topics'] || '—'}</td>
-                                <td className="px-4 py-3 text-gray-700 dark:text-slate-300">{sample['action'] || '—'}</td>
-                                <td className="px-4 py-3 text-gray-500 dark:text-slate-400 text-xs">{sample['prefix'] || '—'}</td>
-                                <td className="px-4 py-3">
-                                  <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
-                                    isDisabled
-                                      ? 'bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-slate-400'
-                                      : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400')}>
-                                    <span className={clsx('w-1.5 h-1.5 rounded-full', isDisabled ? 'bg-gray-400' : 'bg-green-500')} />
-                                    {isDisabled ? 'Disabled' : 'Enabled'}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3"><CoverageBadge coverage={coverage} total={onlineDevices.length} /></td>
-                                <td className="px-4 py-3 text-right">
-                                  <div className="flex items-center justify-end gap-1">
-                                    {canWrite && (
-                                      <button
-                                        onClick={() => setRuleForm({ existing: sample, allCoverage: coverage })}
-                                        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors" title="Edit on all devices">
-                                        <Pencil className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                    {canWrite && (
-                                      <button
-                                        onClick={() => handleToggleRuleAll(coverage, !isDisabled)}
-                                        disabled={togglePending}
-                                        className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
-                                        title={isDisabled ? 'Enable on all devices' : 'Disable on all devices'}>
-                                        <span className="text-xs font-medium">{isDisabled ? 'En' : 'Dis'}</span>
-                                      </button>
-                                    )}
-                                    {canWrite && (
-                                      <button
-                                        onClick={() => setConfirmDeleteAll({ type: 'rule', coverage, label: `rule "${sample['topics']}"` })}
-                                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-700 transition-colors" title="Remove from all devices">
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                }
-              </div>
-
-              {/* Operation results */}
-              {opResults && (
-                <div className="card overflow-hidden">
-                  <div className="px-5 py-3 border-b border-gray-200 dark:border-slate-700 flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-gray-700 dark:text-slate-200">{opResults.label}</h2>
-                    <span className="text-xs text-gray-400 dark:text-slate-500">
-                      {opResults.results.filter(r => r.success).length}/{opResults.results.length} succeeded
-                    </span>
-                    <button onClick={() => setOpResults(null)} className="ml-auto text-gray-400 hover:text-gray-600 dark:hover:text-slate-300">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <div className="divide-y divide-gray-100 dark:divide-slate-800">
-                    {opResults.results.map(r => (
-                      <div key={r.name} className="flex items-center gap-3 px-5 py-2.5">
-                        {r.success
-                          ? <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                          : <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />}
-                        <span className="text-sm font-medium text-gray-800 dark:text-slate-200">{r.name}</span>
-                        {r.error && <span className="text-xs text-red-500 ml-2">{r.error}</span>}
-                        {r.success && <span className="text-xs text-green-600 dark:text-green-400 ml-2">applied</span>}
-                      </div>
-                    ))}
-                  </div>
+          {/* Logging Actions */}
+          <div className="card overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-200 dark:border-slate-700 flex flex-wrap items-center gap-2">
+              <FileText className="w-4 h-4 text-blue-500" />
+              <h2 className="text-sm font-semibold text-gray-700 dark:text-slate-200">
+                Logging Actions<span className="ml-2 text-xs font-normal text-gray-400 dark:text-slate-500">({aggregatedActions.length} unique)</span>
+              </h2>
+              {canWrite && (
+                <div className="ml-auto flex items-center gap-2">
+                  <AddToDevice
+                    devices={onlineDevices}
+                    value={actionTarget}
+                    onChange={setAddActionDeviceId}
+                    onAdd={() => { setSaveError(''); setActionForm({ targetDeviceId: Number(actionTarget) }); }}
+                  />
+                  <button onClick={() => setActionForm({})}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors whitespace-nowrap">
+                    <Plus className="w-3.5 h-3.5" />Add to All Devices
+                  </button>
                 </div>
               )}
-            </>
+            </div>
+            {aggregatedActions.length === 0
+              ? <div className="p-6 text-center text-sm text-gray-400 dark:text-slate-500">No logging actions found across online devices.</div>
+              : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/40">
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Name</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Type</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Destination</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Coverage</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aggregatedActions.map(({ key, sample, coverage }, i) => {
+                        const isBuiltin = BUILTIN_ACTION_NAMES.includes(sample['name'] ?? '');
+                        return (
+                          <tr key={key}
+                            className={clsx('border-b border-gray-100 dark:border-slate-800 transition-colors hover:bg-blue-50 dark:hover:bg-slate-700/40',
+                              i % 2 === 0 ? 'bg-white dark:bg-transparent' : 'bg-gray-50 dark:bg-slate-800/40')}>
+                            <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                              {sample['name']}{isBuiltin && <span className="ml-2 text-xs text-gray-400 dark:text-slate-500">(built-in)</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
+                                sample['type'] === 'remote'
+                                  ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                                  : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-400')}>
+                                {sample['type']}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-700 dark:text-slate-300">
+                              {sample['type'] === 'remote' ? (
+                                <div>
+                                  <span className="font-mono text-xs">{sample['remote'] || '—'}:{sample['remote-port'] || '514'}</span>
+                                  <div className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">
+                                    {sample['syslog-facility'] || 'daemon'} / {sample['syslog-severity'] || 'auto'}
+                                    {sample['bsd-syslog'] === 'yes' && ' · BSD'}
+                                  </div>
+                                </div>
+                              ) : '—'}
+                            </td>
+                            <td className="px-4 py-3"><CoverageBadge coverage={coverage} total={onlineDevices.length} /></td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                {canWrite && (
+                                  <button
+                                    onClick={() => setActionForm({ existing: sample, allCoverage: coverage })}
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors" title="Edit on covered devices">
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {canWrite && !isBuiltin && (
+                                  <button
+                                    onClick={() => setConfirmDeleteAll({ type: 'action', coverage, label: `action "${sample['name']}"` })}
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-700 transition-colors" title="Remove from covered devices">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            }
+          </div>
+
+          {/* Logging Rules */}
+          <div className="card overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-200 dark:border-slate-700 flex flex-wrap items-center gap-2">
+              <FileText className="w-4 h-4 text-indigo-500" />
+              <h2 className="text-sm font-semibold text-gray-700 dark:text-slate-200">
+                Logging Rules<span className="ml-2 text-xs font-normal text-gray-400 dark:text-slate-500">({aggregatedRules.length} unique)</span>
+              </h2>
+              {canWrite && (
+                <div className="ml-auto flex items-center gap-2">
+                  <AddToDevice
+                    devices={onlineDevices}
+                    value={ruleTarget}
+                    onChange={setAddRuleDeviceId}
+                    onAdd={() => { setSaveError(''); setRuleForm({ targetDeviceId: Number(ruleTarget) }); }}
+                  />
+                  <button onClick={() => setRuleForm({})}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors whitespace-nowrap">
+                    <Plus className="w-3.5 h-3.5" />Add to All Devices
+                  </button>
+                </div>
+              )}
+            </div>
+            {aggregatedRules.length === 0
+              ? <div className="p-6 text-center text-sm text-gray-400 dark:text-slate-500">No logging rules found across online devices.</div>
+              : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/40">
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Topics</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Action</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Prefix</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Status</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Coverage</th>
+                        <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aggregatedRules.map(({ key, sample, coverage }, i) => {
+                        const isDisabled = sample['disabled'] === 'true' || sample['disabled'] === 'yes';
+                        return (
+                          <tr key={key}
+                            className={clsx('border-b border-gray-100 dark:border-slate-800 transition-colors hover:bg-blue-50 dark:hover:bg-slate-700/40',
+                              i % 2 === 0 ? 'bg-white dark:bg-transparent' : 'bg-gray-50 dark:bg-slate-800/40')}>
+                            <td className="px-4 py-3 font-mono text-xs text-gray-900 dark:text-white">{sample['topics'] || '—'}</td>
+                            <td className="px-4 py-3 text-gray-700 dark:text-slate-300">{sample['action'] || '—'}</td>
+                            <td className="px-4 py-3 text-gray-500 dark:text-slate-400 text-xs">{sample['prefix'] || '—'}</td>
+                            <td className="px-4 py-3">
+                              <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
+                                isDisabled
+                                  ? 'bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-slate-400'
+                                  : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400')}>
+                                <span className={clsx('w-1.5 h-1.5 rounded-full', isDisabled ? 'bg-gray-400' : 'bg-green-500')} />
+                                {isDisabled ? 'Disabled' : 'Enabled'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3"><CoverageBadge coverage={coverage} total={onlineDevices.length} /></td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                {canWrite && (
+                                  <button
+                                    onClick={() => setRuleForm({ existing: sample, allCoverage: coverage })}
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors" title="Edit on covered devices">
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {canWrite && (
+                                  <button
+                                    onClick={() => handleToggleRuleAll(coverage, !isDisabled)}
+                                    disabled={togglePending}
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                                    title={isDisabled ? 'Enable on covered devices' : 'Disable on covered devices'}>
+                                    <span className="text-xs font-medium">{isDisabled ? 'En' : 'Dis'}</span>
+                                  </button>
+                                )}
+                                {canWrite && (
+                                  <button
+                                    onClick={() => setConfirmDeleteAll({ type: 'rule', coverage, label: `rule "${sample['topics']}"` })}
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-700 transition-colors" title="Remove from covered devices">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            }
+          </div>
+
+          {/* Operation results */}
+          {opResults && (
+            <div className="card overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-200 dark:border-slate-700 flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-700 dark:text-slate-200">{opResults.label}</h2>
+                <span className="text-xs text-gray-400 dark:text-slate-500">
+                  {opResults.results.filter(r => r.success).length}/{opResults.results.length} succeeded
+                </span>
+                <button onClick={() => setOpResults(null)} className="ml-auto text-gray-400 hover:text-gray-600 dark:hover:text-slate-300">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="divide-y divide-gray-100 dark:divide-slate-800">
+                {opResults.results.map(r => (
+                  <div key={r.name} className="flex items-center gap-3 px-5 py-2.5">
+                    {r.success
+                      ? <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                      : <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />}
+                    <span className="text-sm font-medium text-gray-800 dark:text-slate-200">{r.name}</span>
+                    {r.error && <span className="text-xs text-red-500 ml-2">{r.error}</span>}
+                    {r.success && <span className="text-xs text-green-600 dark:text-green-400 ml-2">applied</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
 
       {/* ── Modals ───────────────────────────────────────────────────────────── */}
 
-      {actionForm && mode === 'single' && (
-        <ActionForm existing={actionForm.existing} onSave={handleSaveAction}
-          onClose={() => { setActionForm(null); setSaveError(''); }}
-          isPending={savePending} error={saveError} />
+      {actionForm && (
+        actionForm.targetDeviceId ? (
+          <ActionForm existing={actionForm.existing}
+            targetName={devices.find(d => d.id === actionForm.targetDeviceId)?.name}
+            onSave={data => handleSingleAdd('action', data, actionForm.targetDeviceId!)}
+            onClose={() => { setActionForm(null); setSaveError(''); }}
+            isPending={savePending} error={saveError} />
+        ) : (
+          <ActionForm allDevices existing={actionForm.existing}
+            onSave={data => handleAllDevicesSave('action', data, actionForm.allCoverage)}
+            onClose={() => setActionForm(null)} isPending={false} />
+        )
       )}
-      {actionForm && mode === 'all' && (
-        <ActionForm allDevices existing={actionForm.existing}
-          onSave={data => handleAllDevicesSave('action', data, actionForm.allCoverage)}
-          onClose={() => setActionForm(null)} isPending={false} />
-      )}
-      {ruleForm && mode === 'single' && (
-        <RuleForm existing={ruleForm.existing} actions={singleActions} onSave={handleSaveRule}
-          onClose={() => { setRuleForm(null); setSaveError(''); }}
-          isPending={savePending} error={saveError} />
-      )}
-      {ruleForm && mode === 'all' && (
-        <RuleForm allDevices existing={ruleForm.existing} actions={[]}
-          onSave={data => handleAllDevicesSave('rule', data, ruleForm.allCoverage)}
-          onClose={() => setRuleForm(null)} isPending={false} />
+
+      {ruleForm && (
+        ruleForm.targetDeviceId ? (
+          <RuleForm existing={ruleForm.existing} actions={ruleTargetActions}
+            targetName={devices.find(d => d.id === ruleForm.targetDeviceId)?.name}
+            onSave={data => handleSingleAdd('rule', data, ruleForm.targetDeviceId!)}
+            onClose={() => { setRuleForm(null); setSaveError(''); }}
+            isPending={savePending} error={saveError} />
+        ) : (
+          <RuleForm allDevices existing={ruleForm.existing} actions={[]}
+            onSave={data => handleAllDevicesSave('rule', data, ruleForm.allCoverage)}
+            onClose={() => setRuleForm(null)} isPending={false} />
+        )
       )}
 
       {/* Confirm push to all */}
@@ -1075,7 +835,7 @@ export default function NetworkServicesSyslogPage() {
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
               <div>
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Remove from all devices?</h3>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Remove from devices?</h3>
                 <p className="mt-1 text-sm text-gray-600 dark:text-slate-300">
                   This will remove the <strong>{confirmDeleteAll.label}</strong> from{' '}
                   <strong>{confirmDeleteAll.coverage.length} device{confirmDeleteAll.coverage.length !== 1 ? 's' : ''}</strong>:{' '}
@@ -1088,33 +848,7 @@ export default function NetworkServicesSyslogPage() {
                 className="px-4 py-1.5 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50">Cancel</button>
               <button onClick={executeDeleteAll} disabled={isPushing}
                 className="flex items-center gap-1.5 px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors">
-                {isPushing ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" />Removing…</> : 'Remove from All'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Single-device delete confirm */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-              Delete Logging {confirmDelete.type === 'action' ? 'Action' : 'Rule'}
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-slate-300">
-              {confirmDelete.type === 'action'
-                ? <>Delete action <strong>{confirmDelete.row['name']}</strong>? Rules referencing this action will stop working.</>
-                : <>Delete rule for topics <strong>{confirmDelete.row['topics']}</strong>?</>
-              }
-            </p>
-            {deleteError && <p className="text-sm text-red-500">{deleteError}</p>}
-            <div className="flex justify-end gap-2">
-              <button onClick={() => { setConfirmDelete(null); setDeleteError(''); }}
-                className="px-4 py-1.5 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">Cancel</button>
-              <button onClick={handleSingleDelete} disabled={deletePending}
-                className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors">
-                {deletePending ? 'Deleting…' : 'Delete'}
+                {isPushing ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" />Removing…</> : 'Remove'}
               </button>
             </div>
           </div>

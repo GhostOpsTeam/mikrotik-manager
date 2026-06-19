@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Search, Wifi, Network, Users, X, Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown, RefreshCw } from 'lucide-react';
+import { Search, Wifi, Network, Users, X, Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { clientsApi } from '../services/api';
 import type { Client } from '../types';
 import { useCanWrite } from '../hooks/useCanWrite';
@@ -18,6 +18,33 @@ const REFRESH_OPTIONS = [
 ] as const;
 
 const STORAGE_KEY = 'clients-refresh-interval';
+
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+const PAGE_SIZE_KEY = 'clients-page-size';
+
+function readStoredPageSize(): number {
+  const n = Number(localStorage.getItem(PAGE_SIZE_KEY));
+  return (PAGE_SIZE_OPTIONS as readonly number[]).includes(n) ? n : 50;
+}
+
+// Build a compact list of page numbers (1-based) with ellipses, always keeping
+// the first, last, current page and its immediate neighbours visible.
+function getPageList(current0: number, totalPages: number): (number | 'ellipsis')[] {
+  const cur = current0 + 1;
+  const wanted = new Set<number>([1, totalPages]);
+  for (let i = cur - 1; i <= cur + 1; i++) {
+    if (i >= 1 && i <= totalPages) wanted.add(i);
+  }
+  const sorted = Array.from(wanted).sort((a, b) => a - b);
+  const out: (number | 'ellipsis')[] = [];
+  let prev = 0;
+  for (const p of sorted) {
+    if (prev && p - prev > 1) out.push('ellipsis');
+    out.push(p);
+    prev = p;
+  }
+  return out;
+}
 
 function formatDataBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -139,12 +166,18 @@ export default function ClientsPage() {
   const [refreshInterval, setRefreshInterval] = useState<number | null>(readStoredInterval);
   const refreshIntervalRef = useRef(refreshInterval);
   useEffect(() => { refreshIntervalRef.current = refreshInterval; }, [refreshInterval]);
-  const PAGE_SIZE = 50;
+  const [pageSize, setPageSize] = useState(readStoredPageSize);
 
   const handleIntervalChange = (val: number | null) => {
     setRefreshInterval(val);
     refreshIntervalRef.current = val;
     localStorage.setItem(STORAGE_KEY, String(val));
+  };
+
+  const handlePageSizeChange = (n: number) => {
+    setPageSize(n);
+    setPage(0);
+    localStorage.setItem(PAGE_SIZE_KEY, String(n));
   };
 
   // Sorting is server-side (across the whole dataset, not just the current
@@ -156,10 +189,10 @@ export default function ClientsPage() {
   };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['clients', { search, showAll, page, sortCol, sortDir }],
+    queryKey: ['clients', { search, showAll, page, pageSize, sortCol, sortDir }],
     queryFn: () =>
       clientsApi
-        .list({ search: search || undefined, active: showAll ? undefined : true, limit: PAGE_SIZE, offset: page * PAGE_SIZE, sort: sortCol, dir: sortDir })
+        .list({ search: search || undefined, active: showAll ? undefined : true, limit: pageSize, offset: page * pageSize, sort: sortCol, dir: sortDir })
         .then((r) => r.data),
     refetchInterval: refreshInterval ?? false,
     // Keep the current rows on screen while a sort/page/search refetch is in
@@ -421,29 +454,71 @@ export default function ClientsPage() {
           </div>
 
           {/* Pagination */}
-          {total > PAGE_SIZE && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-500 dark:text-slate-400">
-                Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
-              </span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
-                  className="btn-secondary py-1"
-                >
-                  Previous
-                </button>
-                <button
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={(page + 1) * PAGE_SIZE >= total}
-                  className="btn-secondary py-1"
-                >
-                  Next
-                </button>
+          {total > 0 && (() => {
+            const totalPages = Math.max(1, Math.ceil(total / pageSize));
+            return (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-sm">
+                {/* Entries-per-page + range summary */}
+                <div className="flex items-center gap-2 text-gray-500 dark:text-slate-400">
+                  <span>Show</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                    className="text-sm rounded-lg border border-line bg-surface-2 text-ink px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent"
+                  >
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                  <span>entries</span>
+                  <span className="ml-1 hidden sm:inline">
+                    ({page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} of {total})
+                  </span>
+                </div>
+
+                {/* Numbered page selection */}
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      disabled={page === 0}
+                      aria-label="Previous page"
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    {getPageList(page, totalPages).map((item, i) =>
+                      item === 'ellipsis' ? (
+                        <span key={`e${i}`} className="px-1.5 text-gray-400 dark:text-slate-500 select-none">…</span>
+                      ) : (
+                        <button
+                          key={item}
+                          onClick={() => setPage(item - 1)}
+                          aria-current={item - 1 === page ? 'page' : undefined}
+                          className={clsx(
+                            'inline-flex items-center justify-center min-w-[2rem] h-8 px-2 rounded-lg text-sm font-medium transition-colors',
+                            item - 1 === page
+                              ? 'bg-blue-600 text-white shadow-sm'
+                              : 'text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700'
+                          )}
+                        >
+                          {item}
+                        </button>
+                      )
+                    )}
+                    <button
+                      onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                      disabled={page >= totalPages - 1}
+                      aria-label="Next page"
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </>
       )}
     </div>
