@@ -3,8 +3,8 @@ version: '3.8'
 services:
   nginx:
     build:
-      context: .
-      dockerfile: nginx/Dockerfile
+      context: ./nginx
+      dockerfile: Dockerfile
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
@@ -14,8 +14,6 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
-    networks:
-      - app-network
 
   backend:
     build:
@@ -52,8 +50,6 @@ services:
     cap_add:
       - NET_RAW
     restart: unless-stopped
-    networks:
-      - app-network
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/health"]
       interval: 15s
@@ -71,8 +67,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
-    networks:
-      - app-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mikrotik -d mikrotik_manager"]
       interval: 10s
@@ -86,8 +80,6 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
-    networks:
-      - app-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -106,8 +98,6 @@ services:
     volumes:
       - influxdb_data:/var/lib/influxdb2
     restart: unless-stopped
-    networks:
-      - app-network
     healthcheck:
       test: ["CMD", "influx", "ping"]
       interval: 15s
@@ -122,6 +112,3 @@ volumes:
   backups_data:
   certs_data:
 
-networks:
-  app-network:
-    driver: bridge
