@@ -15,8 +15,6 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
-    networks:
-      - app-network
 
   backend:
     image: ghcr.io/2gt-media-group-llc/mikrotik-manager-backend:latest
@@ -46,8 +44,6 @@ services:
     cap_add:
       - NET_RAW
     restart: unless-stopped
-    networks:
-      - app-network
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/health"]
       interval: 15s
@@ -79,8 +75,6 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
-    networks:
-      - app-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -99,8 +93,6 @@ services:
     volumes:
       - influxdb_data:/var/lib/influxdb2
     restart: unless-stopped
-    networks:
-      - app-network
     healthcheck:
       test: ["CMD", "influx", "ping"]
       interval: 15s
@@ -114,7 +106,3 @@ volumes:
   influxdb_data:
   backups_data:
   certs_data:
-
-networks:
-  app-network:
-    driver: bridge
