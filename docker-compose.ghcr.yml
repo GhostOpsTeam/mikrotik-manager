@@ -3,7 +3,7 @@ version: '3.8'
 # Pre-built image deployment — no source code or build toolchain required.
 # For development/build-from-source, use docker-compose.yml instead.
 
-# services:
+services:
 #   nginx:
 #     image: ghcr.io/2gt-media-group-llc/mikrotik-manager-nginx:latest
 #     ports:
