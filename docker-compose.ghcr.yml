@@ -3,32 +3,32 @@ version: '3.8'
 # Pre-built image deployment — no source code or build toolchain required.
 # For development/build-from-source, use docker-compose.yml instead.
 
-services:
-  nginx:
-    image: ghcr.io/2gt-media-group-llc/mikrotik-manager-nginx:latest
-    ports:
-      - "${HTTP_PORT:-80}:80"
-      - "${HTTPS_PORT:-443}:443"
-    volumes:
-      - certs_data:/certs
-    depends_on:
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
+# services:
+#   nginx:
+#     image: ghcr.io/2gt-media-group-llc/mikrotik-manager-nginx:latest
+#     ports:
+#       - "${HTTP_PORT:-80}:80"
+#       - "${HTTPS_PORT:-443}:443"
+#     volumes:
+#       - certs_data:/certs
+#     depends_on:
+#       backend:
+#         condition: service_healthy
+#     restart: unless-stopped
 
   backend:
     image: ghcr.io/2gt-media-group-llc/mikrotik-manager-backend:latest
     environment:
-      TZ: ${TZ:-UTC}
+      TZ: ${TZ}
       NODE_ENV: production
-      DATABASE_URL: postgresql://mikrotik:${DB_PASSWORD:-mikrotik_secure_pw}@postgres:5432/mikrotik_manager
+      DATABASE_URL: postgresql://mikrotik:${DB_PASSWORD}@postgres:5432/mikrotik_manager
       REDIS_URL: redis://redis:6379
       INFLUXDB_URL: http://influxdb:8086
-      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-mytoken123456789}
-      INFLUXDB_ORG: ${INFLUXDB_ORG:-mikrotik-manager}
-      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-metrics}
-      JWT_SECRET: ${JWT_SECRET:-changeme_use_a_long_random_secret}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-changeme32byteslongencryptionkey}
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
+      INFLUXDB_ORG: ${INFLUXDB_ORG}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET}
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://localhost,http://localhost,https://127.0.0.1,http://127.0.0.1}
       PORT: 3001
     depends_on:
@@ -40,7 +40,7 @@ services:
         condition: service_healthy
     volumes:
       - backups_data:/app/backups
-      - certs_data:/certs
+      # - certs_data:/certs
     cap_add:
       - NET_RAW
     restart: unless-stopped
@@ -52,13 +52,13 @@ services:
       start_period: 30s
 
   postgres:
-    image: postgres:14
+    image: postgres:18
     environment:
       POSTGRES_DB: mikrotik_manager
       POSTGRES_USER: mikrotik
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-mikrotik_secure_pw}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_v18:/var/lib/postgresql
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mikrotik -d mikrotik_manager"]
@@ -68,7 +68,7 @@ services:
       start_period: 10s
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -84,12 +84,12 @@ services:
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD:-admin_password_123}
-      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-mikrotik-manager}
-      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-metrics}
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-mytoken123456789}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN}
     volumes:
-      - influxdb_data:/var/lib/influxdb2
+      - influxdb_data_v2:/var/lib/influxdb2
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "influx", "ping"]
@@ -99,8 +99,8 @@ services:
       start_period: 30s
 
 volumes:
-  postgres_data:
+  postgres_data_v18:
   redis_data:
-  influxdb_data:
+  influxdb_data_v2:
   backups_data:
-  certs_data:
+  # certs_data:
