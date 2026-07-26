@@ -4,17 +4,17 @@ version: '3.8'
 # For development/build-from-source, use docker-compose.yml instead.
 
 services:
-#   nginx:
-#     image: ghcr.io/2gt-media-group-llc/mikrotik-manager-nginx:latest
-#     ports:
-#       - "${HTTP_PORT:-80}:80"
-#       - "${HTTPS_PORT:-443}:443"
-#     volumes:
-#       - certs_data:/certs
-#     depends_on:
-#       backend:
-#         condition: service_healthy
-#     restart: unless-stopped
+  nginx:
+    image: ghcr.io/2gt-media-group-llc/mikrotik-manager-nginx:latest
+    ports:
+      - "${HTTP_PORT:}:80"
+      - "${HTTPS_PORT}:443"
+    volumes:
+      - certs_data:/certs
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
   backend:
     image: ghcr.io/2gt-media-group-llc/mikrotik-manager-backend:latest
@@ -31,8 +31,6 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://localhost,http://localhost,https://127.0.0.1,http://127.0.0.1}
       PORT: 3001
-    ports:
-      - "3001:3001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,7 +40,7 @@ services:
         condition: service_healthy
     volumes:
       - backups_data:/app/backups
-      # - certs_data:/certs
+      - certs_data:/certs
     cap_add:
       - NET_RAW
     restart: unless-stopped
@@ -105,4 +103,4 @@ volumes:
   redis_data:
   influxdb_data_v2:
   backups_data:
-  # certs_data:
+  certs_data:
