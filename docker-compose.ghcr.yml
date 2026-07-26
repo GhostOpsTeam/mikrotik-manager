@@ -31,6 +31,8 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://localhost,http://localhost,https://127.0.0.1,http://127.0.0.1}
       PORT: 3001
+    ports:
+      - "3001:3001"
     depends_on:
       postgres:
         condition: service_healthy
