@@ -57,6 +57,8 @@ services:
       POSTGRES_DB: mikrotik_manager
       POSTGRES_USER: mikrotik
       POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data_v18:/var/lib/postgresql
     restart: unless-stopped
