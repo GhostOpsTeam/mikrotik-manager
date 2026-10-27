@@ -24,6 +24,8 @@ services:
 
   backend:
     image: ghcr.io/2gt-media-group-llc/mikrotik-manager-backend:latest
+    ports:
+      - "2055:2055/udp"
     environment:
       TZ: ${TZ}
       NODE_ENV: production
